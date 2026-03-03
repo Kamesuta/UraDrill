@@ -17,10 +17,12 @@ namespace VerbGame
             rb.constraints = RigidbodyConstraints2D.FreezeRotation;
         }
 
+        private float moveInput;
+        private bool jumpPressed;
+
         void Update()
         {
-            float moveInput = 0f;
-            bool jumpPressed = false;
+            moveInput = 0f;
 
             // InputSystemを使用してキーボード入力を取得
             if (Keyboard.current != null)
@@ -43,13 +45,24 @@ namespace VerbGame
             }
 
             moveInput = Mathf.Clamp(moveInput, -1f, 1f);
+        }
 
+        void FixedUpdate()
+        {
             rb.linearVelocity = new Vector2(moveInput * moveSpeed, rb.linearVelocity.y);
 
             if (jumpPressed && isGrounded)
             {
                 rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
+                // ジャンプを処理したらフラグをリセット
+                jumpPressed = false;
                 isGrounded = false;
+            }
+            else
+            {
+                // 地上にいるかどうかにかかわらず、FixedUpdateごとにリセットして
+                // 長期間ジャンプ入力が残るのを防ぐ
+                jumpPressed = false;
             }
         }
 
