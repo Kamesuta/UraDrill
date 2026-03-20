@@ -9,9 +9,17 @@ namespace VerbGame
     {
         [Header("Movement")]
         public float moveSpeed = 5f;
-        public float jumpForce = 15f;
-        public float rotationSpeed = 15f; // 壁の角度に合わせる回転速度
-        
+        public float rotationSpeed = 28f; // 角でも素早く追従する回転速度
+
+        [Header("Surface Following")]
+        public float gravityAcceleration = 30f;
+        public float maxStickForce = 4f;
+        public float surfaceProbeRadius = 0.35f;
+        public float surfaceProbeDistance = 1.2f;
+        public float airRealignSpeed = 6f;
+        [Range(0f, 90f)]
+        public float forwardSnapAngle = 35f;
+
         [Header("Drill")]
         public float drillSpeed = 5f;
         public LayerMask groundLayer;
@@ -22,10 +30,10 @@ namespace VerbGame
 
         private bool isGrounded;
         private Vector2 surfaceNormal = Vector2.up;
+        private Vector2 desiredUp = Vector2.up;
         private bool isDrilling;
         
         private float moveInput;
-        private bool jumpPressed;
         private bool drillPressed;
 
         void Start()
@@ -64,9 +72,6 @@ namespace VerbGame
                 if (Keyboard.current.rightArrowKey.isPressed || Keyboard.current.dKey.isPressed)
                     moveInput += 1f;
                     
-                if (Keyboard.current.spaceKey.wasPressedThisFrame)
-                    jumpPressed = true;
-
                 // Shiftキーで掘削開始
                 if (Keyboard.current.leftShiftKey.wasPressedThisFrame)
                     drillPressed = true;
@@ -76,8 +81,6 @@ namespace VerbGame
             if (Gamepad.current != null)
             {
                 moveInput += Gamepad.current.leftStick.x.ReadValue();
-                if (Gamepad.current.buttonSouth.wasPressedThisFrame)
-                    jumpPressed = true;
                 if (Gamepad.current.buttonWest.wasPressedThisFrame)
                     drillPressed = true;
             }
@@ -101,70 +104,36 @@ namespace VerbGame
 
         private void NormalUpdate()
         {
-            // 複数のレイキャストで周囲の地形を探索し、角（直角など）でも安定して吸着するようにする
-            Vector2 origin = (Vector2)transform.position;
-            Vector2 down = (Vector2)(-transform.up);
-            Vector2 currentRight = (Vector2)transform.right;
-
-            // 足元センサー：中心、左側、右側
-            RaycastHit2D hitC = Physics2D.Raycast(origin, down, 1.5f, groundLayer);
-            RaycastHit2D hitL = Physics2D.Raycast(origin - currentRight * 0.4f, down, 1.5f, groundLayer);
-            RaycastHit2D hitR = Physics2D.Raycast(origin + currentRight * 0.4f, down, 1.5f, groundLayer);
-            
-            // 正面のセンサー（内角の90度に向かって歩いている時の吸着対策）
-            float lookDir = moveInput != 0 ? Mathf.Sign(moveInput) : 0;
-            RaycastHit2D hitF = lookDir != 0 ? Physics2D.Raycast(origin, currentRight * lookDir, 0.8f, groundLayer) : new RaycastHit2D();
-
-            RaycastHit2D bestHit = new();
-            
-            // 優先順位：目の前の壁 > 足元中央 > 足元左右
-            if (hitF.collider != null) bestHit = hitF;
-            else if (hitC.collider != null) bestHit = hitC;
-            else if (hitL.collider != null) bestHit = hitL;
-            else if (hitR.collider != null) bestHit = hitR;
-
-            if (bestHit.collider != null)
-            {
-                isGrounded = true;
-                surfaceNormal = bestHit.normal;
-            }
-            else
-            {
-                // どのセンサーも地面を検知していない場合は空中状態
-                isGrounded = false;
-                // 空中では徐々に世界の真上（Vector2.up）に向きを戻す
-                surfaceNormal = Vector2.Lerp(surfaceNormal, Vector2.up, Time.fixedDeltaTime * 2f);
-            }
+            UpdateSurfaceNormal();
 
             // 1. キャラクターの向きを接地面の法線に合わせる
             Quaternion targetRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
+            float rotateStep = rotationSpeed * Time.fixedDeltaTime;
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotateStep * 90f);
 
             // 2. 移動速度の計算
             // 現在の速度から、キャラクターの頭方向（Vertical）の速度成分を取り出す
             float verticalSpeed = Vector2.Dot(rb.linearVelocity, transform.up);
             
             // 重力の適用（加速度として計算）
-            float gravityAccel = isGrounded ? 20f : 30f; // 重力加速度
+            float gravityAccel = gravityAcceleration; // カスタム重力
             verticalSpeed -= gravityAccel * Time.fixedDeltaTime;
 
             // 接地している場合、下方向への速度を一定に制限（めり込み・摩擦防止）
-            if (isGrounded && verticalSpeed < -2f)
+            if (isGrounded && verticalSpeed < -maxStickForce)
             {
-                verticalSpeed = -2f; 
+                verticalSpeed = -maxStickForce; 
             }
 
-            // ジャンプの処理
-            if (jumpPressed && isGrounded)
+            // 接地面に沿った接線方向を算出（current normalに垂直な方向）
+            Vector2 surfaceTangent = new Vector2(surfaceNormal.y, -surfaceNormal.x);
+            if (Vector2.Dot(surfaceTangent, transform.right) < 0f)
             {
-                // 垂直速度をジャンプ力で直接書き換える
-                verticalSpeed = jumpForce;
-                isGrounded = false;
+                surfaceTangent = -surfaceTangent;
             }
-            jumpPressed = false;
 
-            // 水平移動速度を計算（キャラクターのローカル右方向）
-            Vector2 horizontalVelocity = (Vector2)transform.right * (moveInput * moveSpeed);
+            // 水平移動速度を計算（接地面の接線方向で常に素早く曲がる）
+            Vector2 horizontalVelocity = surfaceTangent.normalized * (moveInput * moveSpeed);
             // 最終的な速度を合成して適用
             rb.linearVelocity = horizontalVelocity + (Vector2)transform.up * verticalSpeed;
 
@@ -183,6 +152,7 @@ namespace VerbGame
             if (((1 << collision.gameObject.layer) & groundLayer) != 0)
             {
                 surfaceNormal = collision.contacts[0].normal;
+                desiredUp = surfaceNormal;
                 isGrounded = true;
             }
         }
@@ -217,7 +187,64 @@ namespace VerbGame
             rb.bodyType = RigidbodyType2D.Dynamic;
             col.isTrigger = false;
             // 抜け出した瞬間に少しだけ脱出の勢いを付ける
-            rb.linearVelocity = (Vector2)(-transform.up) * 2f;
+            Vector2 newSurface = (Vector2)(-transform.up);
+            desiredUp = newSurface;
+            surfaceNormal = newSurface;
+            isGrounded = false;
+            rb.linearVelocity = newSurface * 2f;
+        }
+
+        private void UpdateSurfaceNormal()
+        {
+            Vector2 origin = transform.position;
+            Vector2 localDown = -transform.up;
+            Vector2 localRight = transform.right;
+
+            RaycastHit2D hitDown = Physics2D.CircleCast(origin, surfaceProbeRadius, localDown, surfaceProbeDistance, groundLayer);
+            RaycastHit2D hitDiagL = Physics2D.CircleCast(origin, surfaceProbeRadius, (localDown - localRight).normalized, surfaceProbeDistance, groundLayer);
+            RaycastHit2D hitDiagR = Physics2D.CircleCast(origin, surfaceProbeRadius, (localDown + localRight).normalized, surfaceProbeDistance, groundLayer);
+
+            RaycastHit2D hitForward = new();
+            if (Mathf.Abs(moveInput) > 0.01f)
+            {
+                Vector2 forward = localRight * Mathf.Sign(moveInput);
+                hitForward = Physics2D.CircleCast(origin + forward * surfaceProbeRadius * 0.5f, surfaceProbeRadius * 0.6f, forward, surfaceProbeDistance * 0.8f, groundLayer);
+            }
+
+            RaycastHit2D groundHit = PickCloserHit(hitDown, PickCloserHit(hitDiagL, hitDiagR));
+            RaycastHit2D bestHit = groundHit.collider != null ? groundHit : hitForward;
+
+            bool allowForwardSnap = hitForward.collider != null
+                                    && Mathf.Abs(moveInput) > 0.01f
+                                    && Vector2.Angle(surfaceNormal, hitForward.normal) >= forwardSnapAngle;
+
+            if (allowForwardSnap)
+            {
+                bestHit = PickCloserHit(groundHit, hitForward);
+            }
+            else if (bestHit.collider == null && hitForward.collider != null)
+            {
+                bestHit = hitForward;
+            }
+
+            if (bestHit.collider != null)
+            {
+                surfaceNormal = bestHit.normal;
+                desiredUp = surfaceNormal;
+                isGrounded = true;
+            }
+            else
+            {
+                isGrounded = false;
+                surfaceNormal = Vector2.Lerp(surfaceNormal, desiredUp, Time.fixedDeltaTime * airRealignSpeed);
+            }
+        }
+
+        private RaycastHit2D PickCloserHit(RaycastHit2D a, RaycastHit2D b)
+        {
+            if (a.collider == null) return b;
+            if (b.collider == null) return a;
+            return a.distance <= b.distance ? a : b;
         }
     }
 }
