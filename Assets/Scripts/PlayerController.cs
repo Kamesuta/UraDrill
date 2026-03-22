@@ -63,6 +63,8 @@ namespace VerbGame
         private bool drillPressed;
         // 掘削開始時に確定した進行方向を保持する。
         private Vector2 drillDirection = Vector2.down;
+        // アニメーションの Bool は状態と完全一致させず、フローの明示タイミングで切り替える。
+        private bool isDrillAnimationPlaying;
         // LitMotion による180度回転ハンドル。
         private MotionHandle drillTurnHandle;
 
@@ -74,7 +76,7 @@ namespace VerbGame
             // 初期向きを足元の面に合わせておく。
             UpdateSurfaceNormal();
             desiredUp = surfaceNormal;
-            transform.rotation = GetSurfaceRotation(surfaceNormal);
+            transform.rotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
         }
 
         void Update()
@@ -209,6 +211,7 @@ namespace VerbGame
         private void BeginDrillAdvance()
         {
             // 180度回転が終わってからアニメーションを開始する。
+            isDrillAnimationPlaying = true;
             SetDrillingAnimation(true);
             movementState = MovementState.Drilling;
 
@@ -233,6 +236,7 @@ namespace VerbGame
         private void FinishDrillTraversal()
         {
             // 反対側へ抜けたらアニメーションを止め、天井側の向きへ確定する。
+            isDrillAnimationPlaying = false;
             SetDrillingAnimation(false);
             surfaceNormal = drillDirection;
             desiredUp = surfaceNormal;
@@ -245,14 +249,14 @@ namespace VerbGame
         {
             movementState = MovementState.SnapBeforeDrill;
             snapTargetPosition = GetNearestGridPosition(transform.position);
-            snapTargetRotation = GetSurfaceRotation(surfaceNormal);
+            snapTargetRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
         }
 
         private void BeginPostDrillSnap()
         {
             movementState = MovementState.SnapAfterDrill;
             snapTargetPosition = GetNearestGridPosition(transform.position);
-            snapTargetRotation = GetSurfaceRotation(surfaceNormal);
+            snapTargetRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
         }
 
         private void CompletePostDrillSnap()
@@ -263,7 +267,7 @@ namespace VerbGame
         private void RotateTowardsSurface(float deltaTime)
         {
             // キャラクターの上方向を面法線に合わせる。
-            Quaternion targetRotation = GetSurfaceRotation(surfaceNormal);
+            Quaternion targetRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
             transform.rotation = Quaternion.RotateTowards(
                 transform.rotation,
                 targetRotation,
@@ -297,13 +301,6 @@ namespace VerbGame
             Vector3 center = grid.GetCellCenterWorld(cell);
             center.z = worldPosition.z;
             return center;
-        }
-
-        private Quaternion GetSurfaceRotation(Vector2 normal)
-        {
-            // 2D キャラなので、回転は常に Z 軸のみに限定する。
-            float angle = Mathf.Atan2(normal.x, normal.y) * Mathf.Rad2Deg;
-            return Quaternion.Euler(0f, 0f, angle);
         }
 
         private bool IsOverlappingGround()
