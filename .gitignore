@@ -97,3 +97,7 @@ crashlytics-build.properties
 
 # Affinity Lock Files
 *.af~lock~
+
+# Screenshots
+Screenshots/
+Screenshots.meta

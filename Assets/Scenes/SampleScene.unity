@@ -15857,23 +15857,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 67fd62b5949d8ee44af81ab85d9da70a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VerbGame.PlayerController
-  moveSpeed: 5
-  rotationSpeed: 720
-  surfaceProbeRadius: 0.35
-  surfaceProbeDistance: 1.2
-  forwardSnapAngle: 35
-  snapMoveSpeed: 8
-  snapRotationSpeed: 720
-  snapPositionThreshold: 0.01
-  snapAngleThreshold: 0.5
   grid: {fileID: 1148986302}
-  drillTurnDuration: 0.2
-  drillSpeed: 5
-  drillEnterDistance: 0.1
-  drillStepDistance: 0.05
-  groundLayer:
-    serializedVersion: 2
-    m_Bits: 256
+  groundTilemap: {fileID: 1057229881}
+  moveDuration: 0.15
+  moveRepeatDelay: 0.12
+  drillStepDuration: 0.05
 --- !u!212 &1946717437
 SpriteRenderer:
   serializedVersion: 2
