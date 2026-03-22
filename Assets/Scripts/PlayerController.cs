@@ -239,9 +239,9 @@ namespace VerbGame
             // LitMotion には直接 Transform + Quaternion を渡さず、
             // 0→1 の progress を作って位置と回転を自前補間する。
             Vector3 startPos = transform.position;
-            Quaternion startRot = transform.rotation;
+            float startZ = transform.eulerAngles.z;
             Vector3 endPos = GetCellCenter(targetCell);
-            Quaternion endRot = Quaternion.FromToRotation(Vector3.up, ToWorld(targetNormal));
+            float endZ = GetRotation(targetNormal).eulerAngles.z;
 
             // 前のモーションが残っていたら必ず停止する。
             activeMotion.TryCancel();
@@ -249,15 +249,16 @@ namespace VerbGame
                 .WithOnComplete(() =>
                 {
                     // 終了時は誤差を残さず、セル中心と角度をぴったり合わせる。
-                    transform.SetPositionAndRotation(endPos, endRot);
+                    transform.SetPositionAndRotation(endPos, Quaternion.Euler(0f, 0f, endZ));
                     onComplete?.Invoke();
                 })
                 .Bind(progress =>
                 {
                     // progress に応じて見た目だけ滑らかに補間する。
+                    float z = Mathf.LerpAngle(startZ, endZ, progress);
                     transform.SetPositionAndRotation(
                         Vector3.Lerp(startPos, endPos, progress),
-                        Quaternion.Slerp(startRot, endRot, progress));
+                        Quaternion.Euler(0f, 0f, z));
                 });
         }
         private void AnimatePositionTo(Vector3Int targetCell, float duration, System.Action onComplete)
@@ -285,7 +286,7 @@ namespace VerbGame
         {
             // ドリル開始前は移動せず、その場で Z 軸角だけを補間する。
             float startZ = transform.eulerAngles.z;
-            float endZ = Quaternion.FromToRotation(Vector3.up, ToWorld(targetNormal)).eulerAngles.z;
+            float endZ = GetRotation(targetNormal).eulerAngles.z;
             Vector3 fixedPos = transform.position;
 
             activeMotion.TryCancel();
@@ -328,15 +329,15 @@ namespace VerbGame
             // 論理状態が決まったら見た目もそこへ揃える。
             transform.SetPositionAndRotation(
                 GetCellCenter(currentCell),
-                Quaternion.FromToRotation(Vector3.up, ToWorld(surfaceNormal)));
+                GetRotation(surfaceNormal));
         }
         // 面法線から右方向接線を作る。
         // up -> right, right -> down, down -> left, left -> up になる。
         private Vector2Int GetTangent(Vector2Int normal) => new(normal.y, -normal.x);
         // Vector2Int を Tilemap 用のセル座標へ変換する。
         private Vector3Int ToCell(Vector2Int value) => new(value.x, value.y, 0);
-        // surfaceNormal を回転計算に使うため 3D ベクトル化する。
-        private Vector3 ToWorld(Vector2Int value) => new(value.x, value.y, 0f);
+        // 4方向の面法線を Z 軸回転だけの Quaternion に変換する。
+        private Quaternion GetRotation(Vector2Int normal) => Quaternion.Euler(0f, 0f, -Mathf.Atan2(normal.x, normal.y) * Mathf.Rad2Deg);
         // そのセルに地形タイルがあるかどうか。
         private bool HasGround(Vector3Int cell) => groundTilemap != null && groundTilemap.HasTile(cell);
         // セル中心のワールド座標を返す。
