@@ -164,16 +164,18 @@ namespace VerbGame
                 snapTargetPosition,
                 snapMoveSpeed * deltaTime);
 
-            Quaternion nextRotation = Quaternion.RotateTowards(
-                transform.rotation,
-                snapTargetRotation,
-                snapRotationSpeed * deltaTime);
+            // Quaternion の最短経路補間は Y/Z 混在を起こしうるため、
+            // スナップ中の回転は Z 軸角だけを明示的に補間する。
+            float currentZ = transform.eulerAngles.z;
+            float targetZ = snapTargetRotation.eulerAngles.z;
+            float nextZ = Mathf.MoveTowardsAngle(currentZ, targetZ, snapRotationSpeed * deltaTime);
+            Quaternion nextRotation = Quaternion.Euler(0f, 0f, nextZ);
 
             transform.SetPositionAndRotation(nextPosition, nextRotation);
             Physics2D.SyncTransforms();
 
             bool positionDone = Vector3.Distance(transform.position, snapTargetPosition) <= snapPositionThreshold;
-            bool rotationDone = Quaternion.Angle(transform.rotation, snapTargetRotation) <= snapAngleThreshold;
+            bool rotationDone = Mathf.Abs(Mathf.DeltaAngle(transform.eulerAngles.z, targetZ)) <= snapAngleThreshold;
             if (!positionDone || !rotationDone)
             {
                 return;
