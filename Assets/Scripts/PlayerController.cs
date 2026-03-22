@@ -126,6 +126,14 @@ namespace VerbGame
             bestCell = currentCell;
             bestNormal = surfaceNormal;
 
+            // 内壁に突き当たった時は、まずその場で壁面へ張り付く。
+            Vector2Int turnNormal = -tangent;
+            if (HasGround(currentCell + ToCell(tangent)) && HasGround(currentCell - ToCell(turnNormal)))
+            {
+                bestNormal = turnNormal;
+                return true;
+            }
+
             // 近傍候補をなめて、最も「前に進めそう」で「今の面と連続性が高い」セルを選ぶ。
             foreach (var offset in Neighbors)
             {
@@ -184,7 +192,21 @@ namespace VerbGame
         {
             // 単発移動の薄いラッパー。状態ロックはここでまとめる。
             isBusy = true;
-            AnimateTo(targetCell, targetNormal, duration, onComplete);
+            Vector3Int delta = targetCell - currentCell;
+            bool isConvexCornerTurn = delta.x != 0 && delta.y != 0 && targetNormal != surfaceNormal;
+            if (!isConvexCornerTurn)
+            {
+                AnimateTo(targetCell, targetNormal, duration, onComplete);
+                return;
+            }
+
+            // 凸角では対角セルへ直線移動すると地面にめり込んで見える。
+            // 見た目だけ中間セルを経由して、角を回り込む軌道にする。
+            Vector3Int cornerWaypoint = currentCell + delta + ToCell(surfaceNormal);
+            AnimateTo(cornerWaypoint, surfaceNormal, duration, () =>
+            {
+                AnimateTo(targetCell, targetNormal, duration, onComplete);
+            });
         }
         private void PlayNextDrillStep()
         {
