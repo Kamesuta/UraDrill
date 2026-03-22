@@ -73,7 +73,14 @@ namespace VerbGame
             if (Time.time < nextMoveTime) return;
 
             // 次の1手を論理クラスに問い合わせる。
-            if (!navigator.TryGetNextStep(moveInput > 0f ? 1 : -1, out var nextCell, out var nextNormal)) return;
+            if (!navigator.TryGetNextStep(moveInput > 0f ? 1 : -1, out var nextCell, out var nextNormal))
+            {
+                // まれに論理セルが見た目とズレると次の1手が見つからなくなる。
+                // 現在位置から境界セルを再取得して、1回だけ探索をやり直す。
+                navigator.SnapToNearestBoundary(transform.position);
+                view.SnapTo(navigator.GetCellCenter(navigator.CurrentCell), navigator.GetRotation(navigator.SurfaceNormal));
+                if (!navigator.TryGetNextStep(moveInput > 0f ? 1 : -1, out nextCell, out nextNormal)) return;
+            }
 
             nextMoveTime = Time.time + moveRepeatDelay;
             StartMove(nextCell, nextNormal);
