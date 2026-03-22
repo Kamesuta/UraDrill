@@ -19,16 +19,19 @@ namespace VerbGame
         private readonly Grid grid;
         // 地形が存在するかどうかを判定する相手。
         private readonly Tilemap groundTilemap;
+        // 地形タイルと特殊パネル定義の対応表。
+        private readonly WallPanelCatalog wallPanelCatalog;
 
         // プレイヤーが今いる空セル。
         public Vector3Int CurrentCell { get; private set; }
         // 今張り付いている地形面の法線。
         public Vector2Int SurfaceNormal { get; private set; } = Vector2Int.up;
 
-        public PlayerGridNavigator(Grid grid, Tilemap groundTilemap)
+        public PlayerGridNavigator(Grid grid, Tilemap groundTilemap, WallPanelCatalog wallPanelCatalog)
         {
             this.grid = grid;
             this.groundTilemap = groundTilemap;
+            this.wallPanelCatalog = wallPanelCatalog;
         }
 
         public void SnapToNearestBoundary(Vector3 worldPosition)
@@ -143,6 +146,18 @@ namespace VerbGame
             return delta.x != 0 && delta.y != 0 && nextNormal != SurfaceNormal;
         }
 
+        public WallPanelDefinition GetPanel(Vector3Int cell)
+        {
+            TileBase tile = groundTilemap != null ? groundTilemap.GetTile(cell) : null;
+            return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
+        }
+
+        public WallPanelType GetPanelType(Vector3Int cell)
+        {
+            TileBase tile = groundTilemap != null ? groundTilemap.GetTile(cell) : null;
+            return wallPanelCatalog != null ? wallPanelCatalog.GetPanelType(tile) : WallPanelType.Default;
+        }
+
         // 凸角ターンの中間点。
         // 現在の面法線方向へ少し回り込んでから、次セルへ入る。
         public Vector3Int GetConvexCornerWaypoint(Vector3Int nextCell) => CurrentCell + (nextCell - CurrentCell) + ToCell(SurfaceNormal);
@@ -156,6 +171,6 @@ namespace VerbGame
         // 2D方向をセル座標へ拡張する。
         private Vector3Int ToCell(Vector2Int value) => new(value.x, value.y, 0);
         // そのセルに地形タイルがあるかどうかだけを見る。
-        private bool HasGround(Vector3Int cell) => groundTilemap != null && groundTilemap.HasTile(cell);
+        private bool HasGround(Vector3Int cell) => groundTilemap != null && groundTilemap.GetTile(cell) != null;
     }
 }
