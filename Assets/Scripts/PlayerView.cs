@@ -106,14 +106,14 @@ namespace VerbGame
             });
         }
 
-        public void RotateBounceThenReturn(Quaternion drillRotation, Quaternion returnRotation, float rotateDuration, List<Vector3> drillPositions, int bounceTurnIndex, float stepDuration, Action onComplete)
+        public void RotateBounceThenReturn(Quaternion drillRotation, Quaternion returnRotation, float rotateDuration, List<Vector3> drillPositions, int bounceTurnIndex, float stepDuration, Action onBounce, Action onComplete)
         {
             // 硬い壁に当たった時は、
             // いったん掘り進めてから元の向きへ戻して引き返す。
             AnimateRotation(drillRotation, rotateDuration, () =>
             {
                 SetDrilling(true);
-                PlayBounceDrillStep(drillPositions, 0, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onComplete);
+                PlayBounceDrillStep(drillPositions, 0, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onBounce, onComplete);
             });
         }
 
@@ -175,7 +175,7 @@ namespace VerbGame
                 });
         }
 
-        private void PlayBounceDrillStep(List<Vector3> drillPositions, int index, int bounceTurnIndex, Quaternion returnRotation, float rotateDuration, float stepDuration, Action onComplete)
+        private void PlayBounceDrillStep(List<Vector3> drillPositions, int index, int bounceTurnIndex, Quaternion returnRotation, float rotateDuration, float stepDuration, Action onBounce, Action onComplete)
         {
             if (drillPositions == null || index < 0 || index >= drillPositions.Count)
             {
@@ -190,14 +190,15 @@ namespace VerbGame
                 {
                     // 硬い壁に当たった瞬間に向きを戻したいので、
                     // 折り返しだけは補間せず即座に回す。
+                    onBounce?.Invoke();
                     SnapRotation(returnRotation);
-                    PlayBounceDrillStep(drillPositions, index + 1, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onComplete);
+                    PlayBounceDrillStep(drillPositions, index + 1, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onBounce, onComplete);
                     return;
                 }
 
                 if (index + 1 < drillPositions.Count)
                 {
-                    PlayBounceDrillStep(drillPositions, index + 1, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onComplete);
+                    PlayBounceDrillStep(drillPositions, index + 1, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onBounce, onComplete);
                     return;
                 }
 

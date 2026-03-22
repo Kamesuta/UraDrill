@@ -5,9 +5,11 @@ using UnityEngine.Tilemaps;
 
 namespace VerbGame
 {
+    [RequireComponent(typeof(AudioSource))]
     // このクラスは「司令塔」だけを担当する。
     // 入力を読み、論理移動クラスに問い合わせ、
     // 最後に見た目クラスへ「こう動いて」と命令する。
+
     public class PlayerController : MonoBehaviour
     {
         // グリッド座標とワールド座標の相互変換に使う。
@@ -29,6 +31,11 @@ namespace VerbGame
         // 氷で滑った時の落下1セルぶん移動時間。
         [SerializeField] private float slipFallStepDuration = 0.12f;
 
+        [Header("Audio")]
+        [SerializeField] private AudioClip drillClip;
+        [SerializeField] private AudioClip fallClip;
+        [SerializeField] private AudioClip hardWallClip;
+
         // グリッド上の論理移動だけを扱うヘルパー。
         private PlayerGridNavigator navigator;
         // LitMotion と Animator をまとめた見た目担当。
@@ -41,12 +48,15 @@ namespace VerbGame
         private float nextMoveTime;
         // アニメーション中に再入力で状態が壊れないようにするロック。
         private bool isBusy;
+        // 効果音専用。PlayOneShot で重ねる。
+        private AudioSource sfxSource;
 
         private void Awake()
         {
             // ロジック担当と見た目担当をここで組み立てる。
             navigator = new PlayerGridNavigator(grid, groundTilemap, wallPanelCatalog);
             view = new PlayerView(transform, GetComponentInChildren<Animator>());
+            EnsureAudioSource();
 
             // 初期位置は、最寄りの境界セルへ論理的にスナップしてから、
             // その結果を見た目へそのまま反映する。
@@ -151,6 +161,7 @@ namespace VerbGame
             // 見た目は「先に回転」「次にアニメーションON」「最後に直進」。
             if (bouncedByHardWall)
             {
+                PlaySfx(drillClip);
                 view.RotateBounceThenReturn(
                     navigator.GetRotation(drillDirection),
                     navigator.GetRotation(navigator.SurfaceNormal),
@@ -158,6 +169,7 @@ namespace VerbGame
                     drillPositions,
                     bounceTurnIndex,
                     drillStepDuration,
+                    () => PlaySfx(hardWallClip),
                     () =>
                     {
                         navigator.FinishDrill(endCell, endNormal);
@@ -169,6 +181,7 @@ namespace VerbGame
                 return true;
             }
 
+            PlaySfx(drillClip);
             view.RotateThenDrill(
                 navigator.GetRotation(drillDirection),
                 drillRotateDuration,
@@ -199,6 +212,7 @@ namespace VerbGame
             }
 
             isBusy = true;
+            PlaySfx(fallClip);
             view.AnimateFall(
                 fallPath.ConvertAll(navigator.GetCellCenter),
                 navigator.GetRotation(landingNormal),
@@ -210,6 +224,25 @@ namespace VerbGame
                     isBusy = false;
                 });
             return true;
+        }
+
+        private void EnsureAudioSource()
+        {
+            sfxSource = GetComponent<AudioSource>();
+            if (sfxSource == null)
+            {
+                sfxSource = gameObject.AddComponent<AudioSource>();
+            }
+
+            sfxSource.playOnAwake = false;
+            sfxSource.loop = false;
+            sfxSource.spatialBlend = 0f;
+        }
+
+        private void PlaySfx(AudioClip clip)
+        {
+            if (sfxSource == null || clip == null) return;
+            sfxSource.PlayOneShot(clip);
         }
 
         public void OnMove(InputAction.CallbackContext context)
