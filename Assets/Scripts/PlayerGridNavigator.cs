@@ -104,23 +104,46 @@ namespace VerbGame
             return bestScore > float.NegativeInfinity;
         }
 
-        public bool TryBuildDrillPath(out Vector2Int drillDirection, out List<Vector3Int> drillPath)
+        public bool TryBuildDrillPath(out Vector2Int drillDirection, out List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out bool bouncedByHardWall, out int bounceTurnIndex)
         {
             // ドリルは常に面法線の逆、つまり地面の中へ掘る。
             drillDirection = -SurfaceNormal;
             drillPath = new List<Vector3Int>();
+            endCell = CurrentCell;
+            endNormal = SurfaceNormal;
+            bouncedByHardWall = false;
+            bounceTurnIndex = -1;
 
             Vector3Int cell = CurrentCell + ToCell(drillDirection);
             if (!HasGround(cell)) return false;
 
-            // 地面セルが切れるまで一直線に進み、
-            // 最初の空セルまでを通過ルートとして保存する。
-            do
+            // 地面セルが切れるまで一直線に進む。
+            // 硬い壁にぶつかったら、通過ではなく反射ルートへ切り替える。
+            while (HasGround(cell))
             {
-                cell += ToCell(drillDirection);
+                if (GetPanelType(cell) == WallPanelType.HardWall)
+                {
+                    // 1セル目から硬い壁なら掘れないので不発にする。
+                    if (drillPath.Count == 0) return false;
+
+                    bouncedByHardWall = true;
+                    // 硬い壁セルそのものには入らない。
+                    // 直前の通常壁セルをそのまま折り返し位置にする。
+                    bounceTurnIndex = drillPath.Count - 1;
+                    BuildHardWallBouncePath(drillPath);
+                    endCell = CurrentCell;
+                    endNormal = SurfaceNormal;
+                    return true;
+                }
+
                 drillPath.Add(cell);
+                cell += ToCell(drillDirection);
             }
-            while (HasGround(cell));
+
+            // 通常の壁なら、最後は地中を抜けた先の空セルへ出る。
+            drillPath.Add(cell);
+            endCell = cell;
+            endNormal = drillDirection;
 
             return true;
         }
@@ -175,11 +198,12 @@ namespace VerbGame
             SurfaceNormal = nextNormal;
         }
 
-        public void FinishDrill(Vector3Int endCell, Vector2Int drillDirection)
+        public void FinishDrill(Vector3Int endCell, Vector2Int endNormal)
         {
             // ドリル終了後の位置と向きを確定する。
+            // 硬い壁で跳ね返った時は、開始地点と元の法線に戻る。
             CurrentCell = endCell;
-            SurfaceNormal = drillDirection;
+            SurfaceNormal = endNormal;
         }
 
         public bool IsConvexCornerTurn(Vector3Int nextCell, Vector2Int nextNormal)
@@ -231,5 +255,16 @@ namespace VerbGame
         private Vector3Int ToCell(Vector2Int value) => new(value.x, value.y, 0);
         // そのセルに地形タイルがあるかどうかだけを見る。
         private bool HasGround(Vector3Int cell) => groundTilemap != null && groundTilemap.GetTile(cell) != null;
+
+        private void BuildHardWallBouncePath(List<Vector3Int> drillPath)
+        {
+            // 進んだ経路をそのまま逆順になぞって、元の位置へ戻す。
+            for (int i = drillPath.Count - 2; i >= 0; i--)
+            {
+                drillPath.Add(drillPath[i]);
+            }
+
+            drillPath.Add(CurrentCell);
+        }
     }
 }

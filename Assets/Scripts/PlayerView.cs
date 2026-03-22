@@ -106,6 +106,17 @@ namespace VerbGame
             });
         }
 
+        public void RotateBounceThenReturn(Quaternion drillRotation, Quaternion returnRotation, float rotateDuration, List<Vector3> drillPositions, int bounceTurnIndex, float stepDuration, Action onComplete)
+        {
+            // 硬い壁に当たった時は、
+            // いったん掘り進めてから元の向きへ戻して引き返す。
+            AnimateRotation(drillRotation, rotateDuration, () =>
+            {
+                SetDrilling(true);
+                PlayBounceDrillStep(drillPositions, 0, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onComplete);
+            });
+        }
+
         public void AnimateFall(List<Vector3> fallPositions, Quaternion landingRotation, float stepDuration, Action onComplete)
         {
             // 氷からの滑落演出。
@@ -164,6 +175,37 @@ namespace VerbGame
                 });
         }
 
+        private void PlayBounceDrillStep(List<Vector3> drillPositions, int index, int bounceTurnIndex, Quaternion returnRotation, float rotateDuration, float stepDuration, Action onComplete)
+        {
+            if (drillPositions == null || index < 0 || index >= drillPositions.Count)
+            {
+                SetDrilling(false);
+                onComplete?.Invoke();
+                return;
+            }
+
+            AnimatePosition(drillPositions[index], stepDuration, () =>
+            {
+                if (index == bounceTurnIndex)
+                {
+                    // 硬い壁に当たった瞬間に向きを戻したいので、
+                    // 折り返しだけは補間せず即座に回す。
+                    SnapRotation(returnRotation);
+                    PlayBounceDrillStep(drillPositions, index + 1, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onComplete);
+                    return;
+                }
+
+                if (index + 1 < drillPositions.Count)
+                {
+                    PlayBounceDrillStep(drillPositions, index + 1, bounceTurnIndex, returnRotation, rotateDuration, stepDuration, onComplete);
+                    return;
+                }
+
+                SetDrilling(false);
+                onComplete?.Invoke();
+            });
+        }
+
         private void AnimatePosition(Vector3 targetPosition, float duration, Action onComplete)
         {
             // ドリル中は向きを固定し、位置だけを動かす。
@@ -202,6 +244,13 @@ namespace VerbGame
                 SyncGroundShadow();
                 onComplete?.Invoke();
             });
+        }
+
+        private void SnapRotation(Quaternion rotation)
+        {
+            // 位置は変えず、向きだけ即時反映する。
+            target.SetPositionAndRotation(target.position, rotation);
+            SyncGroundShadow();
         }
 
         private void Play(float duration, Action<float> onUpdate, Action onComplete)

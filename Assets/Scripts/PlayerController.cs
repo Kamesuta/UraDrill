@@ -57,7 +57,7 @@ namespace VerbGame
         private void Update()
         {
             // 参照不足、または何かの演出中なら新しい操作は受け付けない。
-            if (isBusy || grid == null || groundTilemap == null) return;
+            if (isBusy || grid == null || groundTilemap == null || navigator == null || view == null) return;
 
             // 氷の壁や天井には張り付けないので、入力より先に重力落下する。
             if (TryStartSlipFall()) return;
@@ -141,20 +141,44 @@ namespace VerbGame
         private bool TryStartDrill()
         {
             // まず論理クラスに「掘れるか」と「どこを通るか」を聞く。
-            if (!navigator.TryBuildDrillPath(out var drillDirection, out List<Vector3Int> drillPath)) return false;
+            if (!navigator.TryBuildDrillPath(out var drillDirection, out List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out bool bouncedByHardWall, out int bounceTurnIndex)) return false;
 
             isBusy = true;
             view.SetFacing(moveInput >= 0f ? 1 : -1);
 
+            List<Vector3> drillPositions = drillPath.ConvertAll(navigator.GetCellCenter);
+
             // 見た目は「先に回転」「次にアニメーションON」「最後に直進」。
+            if (bouncedByHardWall)
+            {
+                view.RotateBounceThenReturn(
+                    navigator.GetRotation(drillDirection),
+                    navigator.GetRotation(navigator.SurfaceNormal),
+                    drillRotateDuration,
+                    drillPositions,
+                    bounceTurnIndex,
+                    drillStepDuration,
+                    () =>
+                    {
+                        navigator.FinishDrill(endCell, endNormal);
+                        if (!TryStartSlipFall())
+                        {
+                            isBusy = false;
+                        }
+                    });
+                return true;
+            }
+
             view.RotateThenDrill(
                 navigator.GetRotation(drillDirection),
                 drillRotateDuration,
-                drillPath.ConvertAll(navigator.GetCellCenter),
+                drillPositions,
                 drillStepDuration,
                 () =>
                 {
-                    navigator.FinishDrill(drillPath[^1], drillDirection);
+                    // 通常の壁なら出口へ抜け、
+                    // 硬い壁なら開始地点へ跳ね返された結果を確定する。
+                    navigator.FinishDrill(endCell, endNormal);
                     if (!TryStartSlipFall())
                     {
                         isBusy = false;
@@ -167,6 +191,8 @@ namespace VerbGame
         {
             // 氷の壁・天井に乗っている間は、
             // 入力より先に滑落処理を優先する。
+            if (navigator == null || view == null) return false;
+
             if (!navigator.TryBuildSlipFall(out List<Vector3Int> fallPath, out Vector3Int landingCell, out Vector2Int landingNormal))
             {
                 return false;
