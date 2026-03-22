@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.Tilemaps;
 using UnityEngine.UI;
+using Tile = UnityEngine.Tilemaps.Tile;
 
 namespace VerbGame
 {
@@ -17,26 +19,11 @@ namespace VerbGame
             Eraser,
         }
 
-        [Serializable]
-        private sealed class CellRecord
-        {
-            public int x;
-            public int y;
-            public string panelName;
-        }
-
-        [Serializable]
-        private sealed class TilemapSnapshot
-        {
-            public int version = 1;
-            public List<CellRecord> cells = new();
-        }
-
         [Header("Scene References")]
         [SerializeField] private Camera worldCamera;
         [SerializeField] private Grid grid;
         [SerializeField] private Tilemap groundTilemap;
-        [SerializeField] private WallPanelCatalog wallPanelCatalog;
+        [SerializeField] private LevelEditTilePalette tilePalette;
 
         [Header("UI")]
         [SerializeField] private GameObject uiRoot;
@@ -48,19 +35,24 @@ namespace VerbGame
         [SerializeField] private Button importButton;
         [SerializeField] private TMP_Text currentTileLabel;
         [SerializeField] private TMP_Text messageLabel;
+        [SerializeField] private float tileIconSize = 48f;
+        [SerializeField] private float previewAlpha = 0.35f;
+        [SerializeField] private int previewSortingOrder = 10;
 
         private readonly List<Button> tileButtons = new();
-        private readonly Dictionary<string, WallPanelDefinition> panelByName = new(StringComparer.Ordinal);
+        private readonly List<SpriteRenderer> previewRenderers = new();
 
         private EditTool currentTool = EditTool.Pencil;
-        private WallPanelDefinition selectedPanel;
+        private LevelEditTilePalette.Entry selectedEntry;
         private bool isUiVisible;
         private bool isDragging;
         private Vector3Int dragStartCell;
+        private Vector3Int dragCurrentCell;
+        private Transform previewRoot;
+        private Sprite fallbackPreviewSprite;
 
         private void Awake()
         {
-            RebuildPanelLookup();
             BindButtons();
             BuildTileButtons();
             SetUiVisible(false);
@@ -77,6 +69,7 @@ namespace VerbGame
 
             if (!isUiVisible || Mouse.current == null || worldCamera == null || grid == null || groundTilemap == null)
             {
+                HidePreview();
                 return;
             }
 
@@ -93,36 +86,39 @@ namespace VerbGame
 
         private void BuildTileButtons()
         {
-            if (tileButtonTemplate == null || tileListContent == null || wallPanelCatalog == null) return;
+            if (tileButtonTemplate == null || tileListContent == null || tilePalette == null) return;
 
+            ConfigureTileListLayout();
             tileButtonTemplate.gameObject.SetActive(false);
             tileButtons.Clear();
 
-            IReadOnlyList<WallPanelDefinition> definitions = wallPanelCatalog.PanelDefinitions;
-            if (definitions == null) return;
+            IReadOnlyList<LevelEditTilePalette.Entry> entries = tilePalette.Entries;
+            if (entries == null) return;
 
-            for (int i = 0; i < definitions.Count; i++)
+            for (int i = 0; i < entries.Count; i++)
             {
-                WallPanelDefinition definition = definitions[i];
-                if (definition == null) continue;
+                LevelEditTilePalette.Entry entry = entries[i];
+                if (entry == null || entry.id == 0 || entry.tile == null) continue;
 
                 Button button = Instantiate(tileButtonTemplate, tileListContent);
-                button.gameObject.name = $"TileButton_{definition.name}";
+                button.gameObject.name = $"TileButton_{entry.id}";
                 button.gameObject.SetActive(true);
-                button.onClick.AddListener(() => SelectPanel(definition));
+                button.onClick.AddListener(() => SelectEntry(entry));
+
+                ConfigureTileButtonVisual(button, entry);
 
                 TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
                 if (label != null)
                 {
-                    label.text = definition.name;
+                    label.gameObject.SetActive(false);
                 }
 
                 tileButtons.Add(button);
             }
 
-            if (definitions.Count > 0)
+            if (entries.Count > 0)
             {
-                SelectFirstAvailablePanel(definitions);
+                SelectFirstAvailableEntry(entries);
             }
             else
             {
@@ -130,25 +126,14 @@ namespace VerbGame
             }
         }
 
-        private void SelectFirstAvailablePanel(IReadOnlyList<WallPanelDefinition> definitions)
+        private void SelectFirstAvailableEntry(IReadOnlyList<LevelEditTilePalette.Entry> entries)
         {
-            for (int i = 0; i < definitions.Count; i++)
+            for (int i = 0; i < entries.Count; i++)
             {
-                if (definitions[i] == null) continue;
-                SelectPanel(definitions[i]);
+                LevelEditTilePalette.Entry entry = entries[i];
+                if (entry == null || entry.id == 0 || entry.tile == null) continue;
+                SelectEntry(entry);
                 return;
-            }
-        }
-
-        private void RebuildPanelLookup()
-        {
-            panelByName.Clear();
-            if (wallPanelCatalog == null || wallPanelCatalog.PanelDefinitions == null) return;
-
-            foreach (WallPanelDefinition definition in wallPanelCatalog.PanelDefinitions)
-            {
-                if (definition == null || string.IsNullOrEmpty(definition.name)) continue;
-                panelByName[definition.name] = definition;
             }
         }
 
@@ -167,9 +152,22 @@ namespace VerbGame
                 }
 
                 isDragging = true;
+                dragCurrentCell = dragStartCell;
+                UpdatePreview(dragStartCell, dragCurrentCell);
             }
 
-            if (!isDragging || !Mouse.current.leftButton.wasReleasedThisFrame)
+            if (!isDragging)
+            {
+                return;
+            }
+
+            if (TryGetHoveredCell(out Vector3Int hoveredCell))
+            {
+                dragCurrentCell = hoveredCell;
+                UpdatePreview(dragStartCell, dragCurrentCell);
+            }
+
+            if (!Mouse.current.leftButton.wasReleasedThisFrame)
             {
                 return;
             }
@@ -181,6 +179,7 @@ namespace VerbGame
             }
 
             ApplyRect(dragStartCell, dragEndCell);
+            HidePreview();
         }
 
         private bool TryGetHoveredCell(out Vector3Int cell)
@@ -204,7 +203,7 @@ namespace VerbGame
             int minY = Mathf.Min(startCell.y, endCell.y);
             int maxY = Mathf.Max(startCell.y, endCell.y);
 
-            TileBase tileToPaint = GetSelectedTile();
+            TileBase tileToPaint = selectedEntry?.tile;
             if (currentTool == EditTool.Pencil && tileToPaint == null)
             {
                 SetMessage("選択タイルなし");
@@ -224,9 +223,9 @@ namespace VerbGame
             SetMessage($"{currentTool} [{minX},{minY}] - [{maxX},{maxY}]");
         }
 
-        private void SelectPanel(WallPanelDefinition definition)
+        private void SelectEntry(LevelEditTilePalette.Entry entry)
         {
-            selectedPanel = definition;
+            selectedEntry = entry;
             UpdateCurrentTileLabel();
             UpdateTileButtonHighlights();
         }
@@ -249,96 +248,108 @@ namespace VerbGame
 
         private void ExportToClipboard()
         {
-            if (groundTilemap == null || wallPanelCatalog == null)
+            if (groundTilemap == null || tilePalette == null)
             {
                 SetMessage("Export failed");
                 return;
             }
 
-            TilemapSnapshot snapshot = new();
             BoundsInt bounds = groundTilemap.cellBounds;
-            for (int y = bounds.yMin; y < bounds.yMax; y++)
+            if (bounds.size.x <= 0 || bounds.size.y <= 0)
             {
+                SetMessage("Ground empty");
+                return;
+            }
+
+            StringBuilder csv = new();
+            csv.Append(bounds.xMin).Append(',').Append(bounds.yMin).Append(',').Append(bounds.size.x).Append(',').Append(bounds.size.y);
+
+            for (int y = bounds.yMax - 1; y >= bounds.yMin; y--)
+            {
+                csv.AppendLine();
                 for (int x = bounds.xMin; x < bounds.xMax; x++)
                 {
-                    Vector3Int cell = new(x, y, 0);
-                    TileBase tile = groundTilemap.GetTile(cell);
-                    if (tile == null) continue;
+                    if (x > bounds.xMin) csv.Append(',');
 
-                    WallPanelDefinition definition = wallPanelCatalog.GetPanel(tile);
-                    if (definition == null || string.IsNullOrEmpty(definition.name)) continue;
-
-                    snapshot.cells.Add(new CellRecord
+                    TileBase tile = groundTilemap.GetTile(new Vector3Int(x, y, 0));
+                    int tileId = 0;
+                    if (tilePalette.TryGetEntryByTile(tile, out LevelEditTilePalette.Entry entry))
                     {
-                        x = x,
-                        y = y,
-                        panelName = definition.name,
-                    });
+                        tileId = entry.id;
+                    }
+
+                    csv.Append(tileId);
                 }
             }
 
-            GUIUtility.systemCopyBuffer = JsonUtility.ToJson(snapshot, true);
-            SetMessage($"Export {snapshot.cells.Count} cells");
+            GUIUtility.systemCopyBuffer = csv.ToString();
+            SetMessage($"Export {bounds.size.x}x{bounds.size.y} CSV");
         }
 
         private void ImportFromClipboard()
         {
-            if (groundTilemap == null || wallPanelCatalog == null)
+            if (groundTilemap == null || tilePalette == null)
             {
                 SetMessage("Import failed");
                 return;
             }
 
-            string json = GUIUtility.systemCopyBuffer;
-            if (string.IsNullOrWhiteSpace(json))
+            string csv = GUIUtility.systemCopyBuffer;
+            if (string.IsNullOrWhiteSpace(csv))
             {
                 SetMessage("Clipboard empty");
                 return;
             }
 
-            TilemapSnapshot snapshot;
-            try
+            string[] lines = csv.Replace("\r", string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length < 2)
             {
-                snapshot = JsonUtility.FromJson<TilemapSnapshot>(json);
-            }
-            catch (Exception)
-            {
-                SetMessage("Import parse failed");
+                SetMessage("CSV invalid");
                 return;
             }
 
-            if (snapshot == null || snapshot.cells == null)
+            string[] header = SplitCsvLine(lines[0]);
+            if (header.Length < 4 ||
+                !int.TryParse(header[0], out int xMin) ||
+                !int.TryParse(header[1], out int yMin) ||
+                !int.TryParse(header[2], out int width) ||
+                !int.TryParse(header[3], out int height) ||
+                width <= 0 ||
+                height <= 0)
             {
-                SetMessage("Import data invalid");
+                SetMessage("CSV header invalid");
                 return;
             }
 
             groundTilemap.ClearAllTiles();
 
             int importedCount = 0;
-            for (int i = 0; i < snapshot.cells.Count; i++)
+            int rowCount = Mathf.Min(height, lines.Length - 1);
+            for (int row = 0; row < rowCount; row++)
             {
-                CellRecord cell = snapshot.cells[i];
-                if (cell == null || string.IsNullOrEmpty(cell.panelName)) continue;
-                if (!panelByName.TryGetValue(cell.panelName, out WallPanelDefinition definition)) continue;
+                int y = yMin + (height - 1 - row);
+                string[] ids = SplitCsvLine(lines[row + 1]);
+                for (int xOffset = 0; xOffset < width; xOffset++)
+                {
+                    int tileId = 0;
+                    if (xOffset < ids.Length && !string.IsNullOrWhiteSpace(ids[xOffset]))
+                    {
+                        int.TryParse(ids[xOffset], out tileId);
+                    }
 
-                TileBase tile = GetRepresentativeTile(definition);
-                if (tile == null) continue;
+                    TileBase tile = tilePalette.GetTile(tileId);
+                    if (tile == null)
+                    {
+                        continue;
+                    }
 
-                groundTilemap.SetTile(new Vector3Int(cell.x, cell.y, 0), tile);
-                importedCount++;
+                    groundTilemap.SetTile(new Vector3Int(xMin + xOffset, y, 0), tile);
+                    importedCount++;
+                }
             }
 
             groundTilemap.CompressBounds();
-            SetMessage($"Import {importedCount} cells");
-        }
-
-        private TileBase GetSelectedTile() => GetRepresentativeTile(selectedPanel);
-
-        private static TileBase GetRepresentativeTile(WallPanelDefinition definition)
-        {
-            if (definition == null || definition.Tiles == null || definition.Tiles.Length == 0) return null;
-            return definition.Tiles[0];
+            SetMessage($"Import {importedCount} tiles");
         }
 
         private void UpdateCurrentTileLabel()
@@ -351,7 +362,7 @@ namespace VerbGame
                 return;
             }
 
-            string tileName = selectedPanel != null ? selectedPanel.name : "None";
+            string tileName = selectedEntry != null ? BuildEntryLabel(selectedEntry) : "None";
             currentTileLabel.text = $"Tool: Pencil / Tile: {tileName}";
         }
 
@@ -368,9 +379,178 @@ namespace VerbGame
                 Button button = tileButtons[i];
                 if (button == null) continue;
 
-                bool isSelected = button.name == $"TileButton_{selectedPanel?.name}";
+                bool isSelected = button.name == $"TileButton_{selectedEntry?.id}";
                 SetButtonColor(button, isSelected ? new Color(0.86f, 0.77f, 0.28f, 1f) : new Color(0.24f, 0.24f, 0.24f, 0.94f));
             }
+        }
+
+        private void ConfigureTileListLayout()
+        {
+            if (!tileListContent.TryGetComponent<HorizontalLayoutGroup>(out var horizontalLayout))
+            {
+                horizontalLayout = tileListContent.gameObject.AddComponent<HorizontalLayoutGroup>();
+            }
+
+            horizontalLayout.spacing = 8f;
+            horizontalLayout.padding = new RectOffset(8, 8, 8, 8);
+            horizontalLayout.childAlignment = TextAnchor.MiddleLeft;
+            horizontalLayout.childControlWidth = false;
+            horizontalLayout.childControlHeight = false;
+            horizontalLayout.childForceExpandWidth = false;
+            horizontalLayout.childForceExpandHeight = false;
+
+            if (tileListContent.TryGetComponent<VerticalLayoutGroup>(out var verticalLayout))
+            {
+                verticalLayout.enabled = false;
+            }
+        }
+
+        private void ConfigureTileButtonVisual(Button button, LevelEditTilePalette.Entry entry)
+        {
+            RectTransform rectTransform = button.transform as RectTransform;
+            if (rectTransform != null)
+            {
+                rectTransform.sizeDelta = new Vector2(tileIconSize, tileIconSize);
+            }
+
+            if (button.TryGetComponent<LayoutElement>(out var layoutElement))
+            {
+                layoutElement.preferredWidth = tileIconSize;
+                layoutElement.preferredHeight = tileIconSize;
+                layoutElement.flexibleWidth = 0f;
+                layoutElement.flexibleHeight = 0f;
+            }
+
+            Image iconImage = GetOrCreateIconImage(button);
+            Sprite sprite = GetTileSprite(entry.tile);
+            iconImage.sprite = sprite;
+            iconImage.preserveAspect = true;
+            iconImage.color = sprite != null ? Color.white : new Color(1f, 1f, 1f, 0f);
+            iconImage.raycastTarget = false;
+        }
+
+        private static Image GetOrCreateIconImage(Button button)
+        {
+            Transform existingChild = button.transform.Find("Icon");
+            if (existingChild != null && existingChild.TryGetComponent(out Image existingImage))
+            {
+                return existingImage;
+            }
+
+            GameObject iconObject = new("Icon", typeof(RectTransform), typeof(Image));
+            iconObject.transform.SetParent(button.transform, false);
+
+            RectTransform rectTransform = iconObject.GetComponent<RectTransform>();
+            rectTransform.anchorMin = Vector2.zero;
+            rectTransform.anchorMax = Vector2.one;
+            rectTransform.offsetMin = new Vector2(4f, 4f);
+            rectTransform.offsetMax = new Vector2(-4f, -4f);
+
+            return iconObject.GetComponent<Image>();
+        }
+
+        private static Sprite GetTileSprite(TileBase tileBase)
+        {
+            return tileBase is Tile tile ? tile.sprite : null;
+        }
+
+        private void UpdatePreview(Vector3Int startCell, Vector3Int endCell)
+        {
+            if (!isUiVisible)
+            {
+                HidePreview();
+                return;
+            }
+
+            int minX = Mathf.Min(startCell.x, endCell.x);
+            int maxX = Mathf.Max(startCell.x, endCell.x);
+            int minY = Mathf.Min(startCell.y, endCell.y);
+            int maxY = Mathf.Max(startCell.y, endCell.y);
+            int requiredCount = (maxX - minX + 1) * (maxY - minY + 1);
+
+            EnsurePreviewPool(requiredCount);
+
+            Sprite previewSprite = currentTool == EditTool.Pencil
+                ? GetTileSprite(selectedEntry?.tile) ?? GetFallbackPreviewSprite()
+                : GetFallbackPreviewSprite();
+
+            Color previewColor = currentTool == EditTool.Pencil
+                ? new Color(1f, 1f, 1f, previewAlpha)
+                : new Color(1f, 0.35f, 0.35f, previewAlpha);
+
+            int index = 0;
+            for (int y = minY; y <= maxY; y++)
+            {
+                for (int x = minX; x <= maxX; x++)
+                {
+                    SpriteRenderer renderer = previewRenderers[index++];
+                    renderer.sprite = previewSprite;
+                    renderer.color = previewColor;
+                    renderer.transform.position = grid.GetCellCenterWorld(new Vector3Int(x, y, 0));
+                    renderer.gameObject.SetActive(true);
+                }
+            }
+
+            for (int i = index; i < previewRenderers.Count; i++)
+            {
+                previewRenderers[i].gameObject.SetActive(false);
+            }
+        }
+
+        private void EnsurePreviewPool(int requiredCount)
+        {
+            if (previewRoot == null)
+            {
+                GameObject root = new("EditPreview");
+                root.transform.SetParent(transform, false);
+                previewRoot = root.transform;
+            }
+
+            while (previewRenderers.Count < requiredCount)
+            {
+                GameObject previewObject = new($"Preview_{previewRenderers.Count}");
+                previewObject.transform.SetParent(previewRoot, false);
+                SpriteRenderer renderer = previewObject.AddComponent<SpriteRenderer>();
+                renderer.sortingOrder = previewSortingOrder;
+                renderer.gameObject.SetActive(false);
+                previewRenderers.Add(renderer);
+            }
+        }
+
+        private void HidePreview()
+        {
+            for (int i = 0; i < previewRenderers.Count; i++)
+            {
+                if (previewRenderers[i] != null)
+                {
+                    previewRenderers[i].gameObject.SetActive(false);
+                }
+            }
+        }
+
+        private Sprite GetFallbackPreviewSprite()
+        {
+            if (fallbackPreviewSprite != null) return fallbackPreviewSprite;
+
+            Texture2D texture = new(1, 1, TextureFormat.RGBA32, false);
+            texture.SetPixel(0, 0, Color.white);
+            texture.Apply();
+            fallbackPreviewSprite = Sprite.Create(texture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 1f);
+            fallbackPreviewSprite.name = "EditPreviewSprite";
+            return fallbackPreviewSprite;
+        }
+
+        private static string BuildEntryLabel(LevelEditTilePalette.Entry entry)
+        {
+            if (entry == null) return "None";
+
+            string label = string.IsNullOrWhiteSpace(entry.label) ? $"ID {entry.id}" : entry.label.Trim();
+            return $"{entry.id}: {label}";
+        }
+
+        private static string[] SplitCsvLine(string line)
+        {
+            return line.Split(',', StringSplitOptions.None);
         }
 
         private void SetButtonColor(Button button, Color color)
