@@ -1,5 +1,5 @@
-using System.Collections.Generic;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
@@ -39,7 +39,10 @@ namespace VerbGame
         [SerializeField] private AudioClip hardWallClip;
 
         [Header("Goal")]
+        // クリア表示を出してから次シーンへ進むまでの待ち時間。
         [SerializeField] private float clearDisplayDuration = 1.5f;
+        // シーン上の Clear オブジェクト。表示は Active 切り替えで行う。
+        [SerializeField] private GameObject clearObject;
 
         // グリッド上の論理移動だけを扱うヘルパー。
         private PlayerGridNavigator navigator;
@@ -64,6 +67,7 @@ namespace VerbGame
             navigator = new PlayerGridNavigator(grid, groundTilemap, wallPanelCatalog);
             view = new PlayerView(transform, GetComponentInChildren<Animator>());
             EnsureAudioSource();
+            EnsureClearObject();
 
             // 初期位置は、最寄りの境界セルへ論理的にスナップしてから、
             // その結果を見た目へそのまま反映する。
@@ -226,6 +230,8 @@ namespace VerbGame
 
         private void FinishMovementStep()
         {
+            // 1手ぶんの演出が終わった後は、
+            // 滑落、クリア判定、入力再開の順で後処理する。
             if (TryStartSlipFall()) return;
             if (TryHandleStageClear()) return;
             isBusy = false;
@@ -233,18 +239,22 @@ namespace VerbGame
 
         private bool TryHandleStageClear()
         {
+            // 現在触れている面がチェックポイントなら、
+            // ここで操作を止めてクリア演出へ入る。
             if (isClearingStage || navigator == null || !navigator.IsTouchingCheckpoint()) return false;
 
             isClearingStage = true;
             moveInput = 0f;
             drillPressed = false;
             nextMoveTime = 0f;
+            SetClearVisible(true);
             StartCoroutine(ShowClearAndLoadNextScene());
             return true;
         }
 
         private IEnumerator ShowClearAndLoadNextScene()
         {
+            // 先に Clear 画像を見せてからシーンを切り替える。
             yield return new WaitForSeconds(clearDisplayDuration);
 
             if (TryResolveNextScene(out string nextSceneName))
@@ -254,12 +264,15 @@ namespace VerbGame
             }
 
             Debug.LogWarning($"Next scene was not found from '{SceneManager.GetActiveScene().name}'.");
+            SetClearVisible(false);
             isBusy = false;
             isClearingStage = false;
         }
 
         private bool TryResolveNextScene(out string nextSceneName)
         {
+            // まず scene1 -> scene2 のような命名規則で探し、
+            // 無ければ Build Settings の次インデックスを使う。
             Scene currentScene = SceneManager.GetActiveScene();
             nextSceneName = string.Empty;
 
@@ -283,6 +296,7 @@ namespace VerbGame
 
         private bool HasSceneInBuildSettings(string sceneName)
         {
+            // Build Settings にその名前のシーンが入っているかを確認する。
             for (int i = 0; i < SceneManager.sceneCountInBuildSettings; i++)
             {
                 string scenePath = SceneUtility.GetScenePathByBuildIndex(i);
@@ -297,6 +311,7 @@ namespace VerbGame
 
         private bool TryBuildIncrementedSceneName(string sceneName, out string incrementedName)
         {
+            // 末尾の数字だけを 1 増やして次シーン名を組み立てる。
             incrementedName = string.Empty;
             if (string.IsNullOrEmpty(sceneName)) return false;
 
@@ -308,39 +323,24 @@ namespace VerbGame
 
             if (suffixStart == sceneName.Length) return false;
 
-            string prefix = sceneName.Substring(0, suffixStart);
-            string suffix = sceneName.Substring(suffixStart);
+            string prefix = sceneName[..suffixStart];
+            string suffix = sceneName[suffixStart..];
             if (!int.TryParse(suffix, out int sceneNumber)) return false;
 
             incrementedName = prefix + (sceneNumber + 1);
             return true;
         }
 
-        private void OnGUI()
+        private void EnsureClearObject()
         {
-            if (!isClearingStage) return;
+            SetClearVisible(false);
+        }
 
-            const float width = 420f;
-            const float height = 90f;
-            Rect rect = new(
-                (Screen.width - width) * 0.5f,
-                (Screen.height - height) * 0.5f,
-                width,
-                height);
-
-            GUIStyle style = new(GUI.skin.label)
-            {
-                alignment = TextAnchor.MiddleCenter,
-                fontSize = 40,
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = Color.white }
-            };
-
-            Color previousColor = GUI.color;
-            GUI.color = new Color(0f, 0f, 0f, 0.75f);
-            GUI.Box(rect, GUIContent.none);
-            GUI.color = previousColor;
-            GUI.Label(rect, "クリア！", style);
+        private void SetClearVisible(bool isVisible)
+        {
+            // 表示そのものは GameObject の Active 切り替えだけで行う。
+            if (clearObject == null) return;
+            clearObject.SetActive(isVisible);
         }
 
         private void EnsureAudioSource()
