@@ -53,14 +53,15 @@ namespace VerbGame
 
         private void Update()
         {
-            // 毎フレーム最初に入力を読む。
-            ReadInput();
-
             // 参照不足、または何かの演出中なら新しい操作は受け付けない。
             if (isBusy || grid == null || groundTilemap == null) return;
 
+            // Jump は Unity Event で立てた1回分の要求として消費する。
+            bool drillRequested = drillPressed;
+            drillPressed = false;
+
             // ドリルは通常移動より優先。
-            if (drillPressed && TryStartDrill()) return;
+            if (drillRequested && TryStartDrill()) return;
             if (Mathf.Abs(moveInput) < 0.5f)
             {
                 // 入力が離れたら連続移動の待ち時間もリセットする。
@@ -80,30 +81,6 @@ namespace VerbGame
 
         // コンポーネント停止時は見た目側のモーションだけ止めればよい。
         private void OnDisable() => view?.Stop();
-
-        private void ReadInput()
-        {
-            moveInput = 0f;
-            drillPressed = false;
-
-            // キーボード入力。
-            if (Keyboard.current != null)
-            {
-                if (Keyboard.current.leftArrowKey.isPressed || Keyboard.current.aKey.isPressed) moveInput -= 1f;
-                if (Keyboard.current.rightArrowKey.isPressed || Keyboard.current.dKey.isPressed) moveInput += 1f;
-                if (Keyboard.current.leftShiftKey.wasPressedThisFrame) drillPressed = true;
-            }
-
-            // ゲームパッド入力。
-            if (Gamepad.current != null)
-            {
-                moveInput += Gamepad.current.leftStick.x.ReadValue();
-                if (Gamepad.current.buttonWest.wasPressedThisFrame) drillPressed = true;
-            }
-
-            // 両方の入力が混ざっても扱いやすいよう最後に正規化。
-            moveInput = Mathf.Clamp(moveInput, -1f, 1f);
-        }
 
         private void StartMove(Vector3Int nextCell, Vector2Int nextNormal)
         {
@@ -160,6 +137,29 @@ namespace VerbGame
                     isBusy = false;
                 });
             return true;
+        }
+
+        public void OnMove(InputAction.CallbackContext context)
+        {
+            // PlayerInput の Unity Event から Move を受け取り、
+            // 横成分だけを移動入力として保持する。
+            if (context.performed)
+            {
+                moveInput = Mathf.Clamp(context.ReadValue<Vector2>().x, -1f, 1f);
+            }
+            else if (context.canceled)
+            {
+                moveInput = 0f;
+            }
+        }
+
+        public void OnJump(InputAction.CallbackContext context)
+        {
+            // Jump は押された瞬間だけドリル開始要求に変換する。
+            if (context.performed)
+            {
+                drillPressed = true;
+            }
         }
     }
 }
