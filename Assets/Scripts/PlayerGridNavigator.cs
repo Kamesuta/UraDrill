@@ -125,6 +125,49 @@ namespace VerbGame
             return true;
         }
 
+        public bool TryBuildSlipFall(out List<Vector3Int> fallPath, out Vector3Int landingCell, out Vector2Int landingNormal)
+        {
+            fallPath = new List<Vector3Int>();
+            landingCell = CurrentCell;
+            landingNormal = SurfaceNormal;
+
+            // 床の氷は普通に立てるが、
+            // 壁・天井の氷には張り付けないので滑落対象になる。
+            if (!ShouldSlipOnCurrentSurface()) return false;
+
+            while (true)
+            {
+                // 落下途中で同じ向きの非氷面が現れたら、
+                // そこへ再び張り付ける。
+                if (CanAttachToNonIceSurface(landingCell, SurfaceNormal))
+                {
+                    landingNormal = SurfaceNormal;
+                    return landingCell != CurrentCell;
+                }
+
+                // 真下に床があるなら、最後は床へ着地する。
+                if (HasGround(landingCell + Vector3Int.down))
+                {
+                    landingNormal = Vector2Int.up;
+                    return landingCell != CurrentCell || landingNormal != SurfaceNormal;
+                }
+
+                // まだ支えが無ければ、重力方向へ1セルぶん落とす。
+                Vector3Int nextCell = landingCell + Vector3Int.down;
+                fallPath.Add(nextCell);
+                landingCell = nextCell;
+
+                // タイルマップ範囲の外へ抜けたら、それ以上は追わない。
+                if (groundTilemap != null && landingCell.y < groundTilemap.cellBounds.yMin - 1)
+                {
+                    break;
+                }
+            }
+
+            landingNormal = Vector2Int.up;
+            return landingCell != CurrentCell || landingNormal != SurfaceNormal;
+        }
+
         public void CommitMove(Vector3Int nextCell, Vector2Int nextNormal)
         {
             // 通常移動1手の論理結果を確定する。
@@ -156,6 +199,22 @@ namespace VerbGame
         {
             TileBase tile = groundTilemap != null ? groundTilemap.GetTile(cell) : null;
             return wallPanelCatalog != null ? wallPanelCatalog.GetPanelType(tile) : WallPanelType.Default;
+        }
+
+        public bool ShouldSlipOnCurrentSurface()
+        {
+            // 上向き法線は床なので滑らない。
+            if (SurfaceNormal == Vector2Int.up) return false;
+            return GetPanelType(CurrentCell - ToCell(SurfaceNormal)) == WallPanelType.Ice;
+        }
+
+        private bool CanAttachToNonIceSurface(Vector3Int cell, Vector2Int normal)
+        {
+            // 今向いている面の地形を見て、
+            // 氷以外ならそこへ張り直せる。
+            Vector3Int supportCell = cell - ToCell(normal);
+            if (!HasGround(supportCell)) return false;
+            return GetPanelType(supportCell) != WallPanelType.Ice;
         }
 
         // 凸角ターンの中間点。

@@ -106,6 +106,19 @@ namespace VerbGame
             });
         }
 
+        public void AnimateFall(List<Vector3> fallPositions, Quaternion landingRotation, float stepDuration, Action onComplete)
+        {
+            // 氷からの滑落演出。
+            // 落下セル列を順にたどり、最後だけ着地姿勢へ回す。
+            if (fallPositions == null || fallPositions.Count == 0)
+            {
+                AnimateRotation(landingRotation, stepDuration, onComplete);
+                return;
+            }
+
+            PlayFallStep(fallPositions, 0, landingRotation, stepDuration, onComplete);
+        }
+
         // 外部から停止命令が来た時は、モーションも Drill 演出も止める。
         public void Stop()
         {
@@ -127,6 +140,28 @@ namespace VerbGame
                 SetDrilling(false);
                 onComplete?.Invoke();
             });
+        }
+
+        private void PlayFallStep(List<Vector3> fallPositions, int index, Quaternion landingRotation, float stepDuration, Action onComplete)
+        {
+            // 落下は1セルずつ再生し、
+            // 最終セルだけ着地先の法線へ向きを合わせる。
+            bool isLastStep = index == fallPositions.Count - 1;
+
+            AnimateStep(
+                fallPositions[index],
+                isLastStep ? landingRotation : target.rotation,
+                stepDuration,
+                () =>
+                {
+                    if (!isLastStep)
+                    {
+                        PlayFallStep(fallPositions, index + 1, landingRotation, stepDuration, onComplete);
+                        return;
+                    }
+
+                    onComplete?.Invoke();
+                });
         }
 
         private void AnimatePosition(Vector3 targetPosition, float duration, Action onComplete)

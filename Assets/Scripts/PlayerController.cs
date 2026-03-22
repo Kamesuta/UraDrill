@@ -26,6 +26,8 @@ namespace VerbGame
         [SerializeField] private float drillRotateDuration = 0.12f;
         // ドリル中の1セルぶん移動時間。
         [SerializeField] private float drillStepDuration = 0.15f;
+        // 氷で滑った時の落下1セルぶん移動時間。
+        [SerializeField] private float slipFallStepDuration = 0.12f;
 
         // グリッド上の論理移動だけを扱うヘルパー。
         private PlayerGridNavigator navigator;
@@ -56,6 +58,9 @@ namespace VerbGame
         {
             // 参照不足、または何かの演出中なら新しい操作は受け付けない。
             if (isBusy || grid == null || groundTilemap == null) return;
+
+            // 氷の壁や天井には張り付けないので、入力より先に重力落下する。
+            if (TryStartSlipFall()) return;
 
             // Jump は Unity Event で立てた1回分の要求として消費する。
             bool drillRequested = drillPressed;
@@ -107,7 +112,10 @@ namespace VerbGame
                     () =>
                     {
                         navigator.CommitMove(nextCell, nextNormal);
-                        isBusy = false;
+                        if (!TryStartSlipFall())
+                        {
+                            isBusy = false;
+                        }
                     });
                 return;
             }
@@ -123,7 +131,10 @@ namespace VerbGame
                 () =>
                 {
                     navigator.CommitMove(nextCell, nextNormal);
-                    isBusy = false;
+                    if (!TryStartSlipFall())
+                    {
+                        isBusy = false;
+                    }
                 });
         }
 
@@ -144,6 +155,32 @@ namespace VerbGame
                 () =>
                 {
                     navigator.FinishDrill(drillPath[^1], drillDirection);
+                    if (!TryStartSlipFall())
+                    {
+                        isBusy = false;
+                    }
+                });
+            return true;
+        }
+
+        private bool TryStartSlipFall()
+        {
+            // 氷の壁・天井に乗っている間は、
+            // 入力より先に滑落処理を優先する。
+            if (!navigator.TryBuildSlipFall(out List<Vector3Int> fallPath, out Vector3Int landingCell, out Vector2Int landingNormal))
+            {
+                return false;
+            }
+
+            isBusy = true;
+            view.AnimateFall(
+                fallPath.ConvertAll(navigator.GetCellCenter),
+                navigator.GetRotation(landingNormal),
+                slipFallStepDuration,
+                () =>
+                {
+                    // 落下が終わった位置と張り付き先を論理状態へ反映する。
+                    navigator.CommitMove(landingCell, landingNormal);
                     isBusy = false;
                 });
             return true;
