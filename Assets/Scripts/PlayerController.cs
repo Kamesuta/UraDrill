@@ -1,85 +1,117 @@
+using LitMotion;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-namespace VerbGame 
+namespace VerbGame
 {
-    [RequireComponent(typeof(Rigidbody2D))]
     [RequireComponent(typeof(Collider2D))]
     public class PlayerController : MonoBehaviour
     {
+        // プレイヤー制御は「通常移動」「掘削前スナップ」「掘削前の180度回転」「掘削中」「掘削後スナップ」の状態で管理する。
+        private enum MovementState
+        {
+            Normal,
+            SnapBeforeDrill,
+            RotateBeforeDrill,
+            Drilling,
+            SnapAfterDrill,
+        }
+
         [Header("Movement")]
         public float moveSpeed = 5f;
-        public float rotationSpeed = 28f; // 角でも素早く追従する回転速度
+        public float rotationSpeed = 720f;
 
         [Header("Surface Following")]
-        public float gravityAcceleration = 30f;
-        public float maxStickForce = 4f;
         public float surfaceProbeRadius = 0.35f;
         public float surfaceProbeDistance = 1.2f;
-        public float airRealignSpeed = 6f;
         [Range(0f, 90f)]
         public float forwardSnapAngle = 35f;
 
+        [Header("Grid Snap")]
+        public float snapMoveSpeed = 8f;
+        public float snapRotationSpeed = 720f;
+        public float snapPositionThreshold = 0.01f;
+        public float snapAngleThreshold = 0.5f;
+        public Grid grid;
+
         [Header("Drill")]
+        public float drillTurnDuration = 0.2f;
         public float drillSpeed = 5f;
+        public float drillEnterDistance = 0.1f;
         public LayerMask groundLayer;
-        
-        private Rigidbody2D rb;
+
+        // Drill 子オブジェクトのアニメーターを想定している。
         private Animator animator;
+        // 物理移動はしないが、地形との重なり判定には Collider2D を使う。
         private Collider2D col;
 
+        private MovementState movementState = MovementState.Normal;
+        // 現在どこかの面に接しているかどうか。
         private bool isGrounded;
+        // 今いる面の法線。これを基準に「上方向」と接線方向を決める。
         private Vector2 surfaceNormal = Vector2.up;
+        // 一時的に接地判定を失っても、直前の向きを維持するための退避値。
         private Vector2 desiredUp = Vector2.up;
-        private bool isDrilling;
-        
+        // スナップ先のグリッド座標。
+        private Vector3 snapTargetPosition;
+        // スナップ完了時の回転。
+        private Quaternion snapTargetRotation = Quaternion.identity;
+
+        // 左右入力は -1 〜 1 に正規化して使う。
         private float moveInput;
+        // 掘る入力はそのフレームで一度だけ消費する。
         private bool drillPressed;
+        // 掘削開始時に確定した進行方向を保持する。
+        private Vector2 drillDirection = Vector2.down;
+        // LitMotion による180度回転ハンドル。
+        private MotionHandle drillTurnHandle;
 
         void Start()
         {
-            rb = GetComponent<Rigidbody2D>();
             col = GetComponent<Collider2D>();
-            // 子オブジェクトのAnimatorを取得（Drillオブジェクトにアタッチされているもの）
             animator = GetComponentInChildren<Animator>();
-            
-            // 回転はTransformを直接操作して制御するため、物理挙動による回転は固定する
-            rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-            // 壁歩きのためにカスタム重力をスクリプト内で適用するので、標準の重力は0にする
-            rb.gravityScale = 0; 
+
+            // 初期向きを足元の面に合わせておく。
+            UpdateSurfaceNormal();
+            desiredUp = surfaceNormal;
+            transform.rotation = GetSurfaceRotation(surfaceNormal);
         }
 
         void Update()
         {
+            // 入力取得、状態更新、見た目更新を順に行う。
             HandleInput();
-            
-            // アニメーション更新 (DrillingのBool値を更新して採掘アニメーションを制御)
-            if (animator != null)
-            {
-                animator.SetBool("Drilling", isDrilling);
-            }
+            TickState(Time.deltaTime);
+
+            // 押下イベントは毎フレーム末尾でクリアし、長押しで多重開始しないようにする。
+            drillPressed = false;
+        }
+
+        void OnDisable()
+        {
+            drillTurnHandle.TryCancel();
+            SetDrillingAnimation(false);
         }
 
         private void HandleInput()
         {
             moveInput = 0f;
 
-            // InputSystemを使用してキーボード入力を取得
             if (Keyboard.current != null)
             {
                 if (Keyboard.current.leftArrowKey.isPressed || Keyboard.current.aKey.isPressed)
                     moveInput -= 1f;
                 if (Keyboard.current.rightArrowKey.isPressed || Keyboard.current.dKey.isPressed)
                     moveInput += 1f;
-                    
-                // Shiftキーで掘削開始
+
+                // Shift で掘削開始を予約する。
                 if (Keyboard.current.leftShiftKey.wasPressedThisFrame)
                     drillPressed = true;
             }
 
-            // Gamepad入力
             if (Gamepad.current != null)
             {
+                // キーボードとゲームパッドを足し合わせ、最後に Clamp する。
                 moveInput += Gamepad.current.leftStick.x.ReadValue();
                 if (Gamepad.current.buttonWest.wasPressedThisFrame)
                     drillPressed = true;
@@ -88,114 +120,217 @@ namespace VerbGame
             moveInput = Mathf.Clamp(moveInput, -1f, 1f);
         }
 
-        void FixedUpdate()
+        private void TickState(float deltaTime)
         {
-            if (isDrilling)
+            // 現在の状態に応じて処理を分岐する。
+            switch (movementState)
             {
-                // 掘削中の移動更新
-                DrillUpdate();
-            }
-            else
-            {
-                // 通常時（壁歩行含む）の移動更新
-                NormalUpdate();
+                case MovementState.Normal:
+                    NormalUpdate(deltaTime);
+                    break;
+                case MovementState.SnapBeforeDrill:
+                case MovementState.SnapAfterDrill:
+                    SnapUpdate(deltaTime);
+                    break;
+                case MovementState.RotateBeforeDrill:
+                    break;
+                case MovementState.Drilling:
+                    DrillUpdate(deltaTime);
+                    break;
             }
         }
 
-        private void NormalUpdate()
+        private void NormalUpdate(float deltaTime)
         {
+            // 通常時は足元の面を検出し続け、面に沿って移動・回転する。
             UpdateSurfaceNormal();
+            RotateTowardsSurface(deltaTime);
+            MoveAlongSurface(deltaTime);
 
-            // 1. キャラクターの向きを接地面の法線に合わせる
-            Quaternion targetRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
-            float rotateStep = rotationSpeed * Time.fixedDeltaTime;
-            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotateStep * 90f);
-
-            // 2. 移動速度の計算
-            // 現在の速度から、キャラクターの頭方向（Vertical）の速度成分を取り出す
-            float verticalSpeed = Vector2.Dot(rb.linearVelocity, transform.up);
-            
-            // 重力の適用（加速度として計算）
-            float gravityAccel = gravityAcceleration; // カスタム重力
-            verticalSpeed -= gravityAccel * Time.fixedDeltaTime;
-
-            // 接地している場合、下方向への速度を一定に制限（めり込み・摩擦防止）
-            if (isGrounded && verticalSpeed < -maxStickForce)
+            // 掘削は接地している時だけ開始できる。
+            if (drillPressed && isGrounded)
             {
-                verticalSpeed = -maxStickForce; 
+                BeginPreDrillSnap();
+            }
+        }
+
+        private void SnapUpdate(float deltaTime)
+        {
+            // 掘削前後とも、最終的な位置と向きへスムーズに吸着させる。
+            Vector3 nextPosition = Vector3.MoveTowards(
+                transform.position,
+                snapTargetPosition,
+                snapMoveSpeed * deltaTime);
+
+            Quaternion nextRotation = Quaternion.RotateTowards(
+                transform.rotation,
+                snapTargetRotation,
+                snapRotationSpeed * deltaTime);
+
+            transform.SetPositionAndRotation(nextPosition, nextRotation);
+            Physics2D.SyncTransforms();
+
+            bool positionDone = Vector3.Distance(transform.position, snapTargetPosition) <= snapPositionThreshold;
+            bool rotationDone = Quaternion.Angle(transform.rotation, snapTargetRotation) <= snapAngleThreshold;
+            if (!positionDone || !rotationDone)
+            {
+                return;
             }
 
-            // 接地面に沿った接線方向を算出（current normalに垂直な方向）
-            Vector2 surfaceTangent = new Vector2(surfaceNormal.y, -surfaceNormal.x);
+            transform.SetPositionAndRotation(snapTargetPosition, snapTargetRotation);
+            Physics2D.SyncTransforms();
+
+            if (movementState == MovementState.SnapBeforeDrill)
+            {
+                StartDrillRotation();
+                return;
+            }
+
+            CompletePostDrillSnap();
+        }
+
+        private void StartDrillRotation()
+        {
+            // 掘削方向はスナップ直後の面法線から確定する。
+            drillDirection = -surfaceNormal;
+            movementState = MovementState.RotateBeforeDrill;
+
+            Quaternion startRotation = transform.rotation;
+            drillTurnHandle.TryCancel();
+            drillTurnHandle = LMotion.Create(0f, 180f, drillTurnDuration)
+                .WithEase(Ease.InOutSine)
+                .WithOnComplete(BeginDrillAdvance)
+                .Bind(angle =>
+                {
+                    transform.rotation = startRotation * Quaternion.Euler(0f, 0f, angle);
+                });
+        }
+
+        private void BeginDrillAdvance()
+        {
+            // 180度回転が終わってからアニメーションを開始する。
+            SetDrillingAnimation(true);
+            movementState = MovementState.Drilling;
+
+            // 境界線ちょうどで開始すると重なり判定が不安定なので、少しだけ中へ押し込む。
+            transform.position += (Vector3)(drillDirection * drillEnterDistance);
+            Physics2D.SyncTransforms();
+        }
+
+        private void DrillUpdate(float deltaTime)
+        {
+            // 掘削中は開始時に確定した方向へ直進する。
+            transform.position += (Vector3)(drillDirection * (drillSpeed * deltaTime));
+            Physics2D.SyncTransforms();
+
+            // 地形との重なりがなくなった瞬間を「反対側へ抜けた」とみなす。
+            if (!IsOverlappingGround())
+            {
+                FinishDrillTraversal();
+            }
+        }
+
+        private void FinishDrillTraversal()
+        {
+            // 反対側へ抜けたらアニメーションを止め、天井側の向きへ確定する。
+            SetDrillingAnimation(false);
+            surfaceNormal = drillDirection;
+            desiredUp = surfaceNormal;
+            isGrounded = true;
+
+            BeginPostDrillSnap();
+        }
+
+        private void BeginPreDrillSnap()
+        {
+            movementState = MovementState.SnapBeforeDrill;
+            snapTargetPosition = GetNearestGridPosition(transform.position);
+            snapTargetRotation = GetSurfaceRotation(surfaceNormal);
+        }
+
+        private void BeginPostDrillSnap()
+        {
+            movementState = MovementState.SnapAfterDrill;
+            snapTargetPosition = GetNearestGridPosition(transform.position);
+            snapTargetRotation = GetSurfaceRotation(surfaceNormal);
+        }
+
+        private void CompletePostDrillSnap()
+        {
+            movementState = MovementState.Normal;
+        }
+
+        private void RotateTowardsSurface(float deltaTime)
+        {
+            // キャラクターの上方向を面法線に合わせる。
+            Quaternion targetRotation = GetSurfaceRotation(surfaceNormal);
+            transform.rotation = Quaternion.RotateTowards(
+                transform.rotation,
+                targetRotation,
+                rotationSpeed * deltaTime);
+        }
+
+        private void MoveAlongSurface(float deltaTime)
+        {
+            // 接地していない、または入力が小さい場合は移動しない。
+            if (!isGrounded || Mathf.Abs(moveInput) < 0.01f)
+            {
+                return;
+            }
+
+            // 法線に直交するベクトルが「面に沿った移動方向」になる。
+            Vector2 surfaceTangent = new(surfaceNormal.y, -surfaceNormal.x);
             if (Vector2.Dot(surfaceTangent, transform.right) < 0f)
             {
+                // キャラクターの右方向と揃えて左右入力の意味を安定させる。
                 surfaceTangent = -surfaceTangent;
             }
 
-            // 水平移動速度を計算（接地面の接線方向で常に素早く曲がる）
-            Vector2 horizontalVelocity = surfaceTangent.normalized * (moveInput * moveSpeed);
-            // 最終的な速度を合成して適用
-            rb.linearVelocity = horizontalVelocity + (Vector2)transform.up * verticalSpeed;
+            transform.position += (Vector3)(surfaceTangent.normalized * (moveInput * moveSpeed * deltaTime));
+            Physics2D.SyncTransforms();
+        }
 
-            // 掘削開始処理
-            if (drillPressed && isGrounded)
+        private Vector3 GetNearestGridPosition(Vector3 worldPosition)
+        {
+            // Grid のセル中心をスナップ先に使う。
+            Vector3Int cell = grid.WorldToCell(worldPosition);
+            Vector3 center = grid.GetCellCenterWorld(cell);
+            center.z = worldPosition.z;
+            return center;
+        }
+
+        private Quaternion GetSurfaceRotation(Vector2 normal)
+        {
+            // 2D キャラなので、回転は常に Z 軸のみに限定する。
+            float angle = Mathf.Atan2(normal.x, normal.y) * Mathf.Rad2Deg;
+            return Quaternion.Euler(0f, 0f, angle);
+        }
+
+        private bool IsOverlappingGround()
+        {
+            // transform 直更新後でも確実に調べられる OverlapCollider を使う。
+            ContactFilter2D filter = new()
             {
-                StartDrilling();
-            }
-            drillPressed = false;
+                useLayerMask = true,
+                layerMask = groundLayer,
+                useTriggers = false
+            };
+
+            Collider2D[] results = new Collider2D[8];
+            return col.Overlap(filter, results) > 0;
         }
 
-        private void OnCollisionStay2D(Collision2D collision)
+        private void SetDrillingAnimation(bool isPlaying)
         {
-            if (isDrilling) return;
-            // 壁に接触している間は常に法線を更新し、ジャンプ中に壁に当たった時でも即座に張り付くようにする
-            if (((1 << collision.gameObject.layer) & groundLayer) != 0)
+            if (animator != null)
             {
-                surfaceNormal = collision.contacts[0].normal;
-                desiredUp = surfaceNormal;
-                isGrounded = true;
+                animator.SetBool("Drilling", isPlaying);
             }
-        }
-
-        private void StartDrilling()
-        {
-            isDrilling = true;
-            // 掘削中は物理演算の影響を受けず直線的に進むため、Kinematicに変更
-            rb.bodyType = RigidbodyType2D.Kinematic;
-            // 地面を通り抜けられるようにトリガー化する
-            col.isTrigger = true;
-            rb.linearVelocity = Vector2.zero;
-        }
-
-        private void DrillUpdate()
-        {
-            // 向いている方向（ドリル方向）に一定速度で進む
-            Vector3 drillDirection = -transform.up;
-            rb.MovePosition(rb.position + (Vector2)(drillDirection * drillSpeed * Time.fixedDeltaTime));
-
-            // 地面(Groundレイヤー)を完全に抜け出したかチェック
-            if (!col.IsTouchingLayers(groundLayer))
-            {
-                StopDrilling();
-            }
-        }
-
-        private void StopDrilling()
-        {
-            isDrilling = false;
-            // 物理挙動を通常（Dynamic）に戻す
-            rb.bodyType = RigidbodyType2D.Dynamic;
-            col.isTrigger = false;
-            // 抜け出した瞬間に少しだけ脱出の勢いを付ける
-            Vector2 newSurface = (Vector2)(-transform.up);
-            desiredUp = newSurface;
-            surfaceNormal = newSurface;
-            isGrounded = false;
-            rb.linearVelocity = newSurface * 2f;
         }
 
         private void UpdateSurfaceNormal()
         {
+            // 足元・斜め前下・斜め後下を調べ、今いる面の法線を推定する。
             Vector2 origin = transform.position;
             Vector2 localDown = -transform.up;
             Vector2 localRight = transform.right;
@@ -204,19 +339,26 @@ namespace VerbGame
             RaycastHit2D hitDiagL = Physics2D.CircleCast(origin, surfaceProbeRadius, (localDown - localRight).normalized, surfaceProbeDistance, groundLayer);
             RaycastHit2D hitDiagR = Physics2D.CircleCast(origin, surfaceProbeRadius, (localDown + localRight).normalized, surfaceProbeDistance, groundLayer);
 
-            RaycastHit2D hitForward = new();
+            RaycastHit2D hitForward = default;
             if (Mathf.Abs(moveInput) > 0.01f)
             {
+                // 入力方向の少し前も調べて、角を曲がる候補を拾いやすくする。
                 Vector2 forward = localRight * Mathf.Sign(moveInput);
-                hitForward = Physics2D.CircleCast(origin + forward * surfaceProbeRadius * 0.5f, surfaceProbeRadius * 0.6f, forward, surfaceProbeDistance * 0.8f, groundLayer);
+                hitForward = Physics2D.CircleCast(
+                    origin + 0.5f * surfaceProbeRadius * forward,
+                    surfaceProbeRadius * 0.6f,
+                    forward,
+                    surfaceProbeDistance * 0.8f,
+                    groundLayer);
             }
 
             RaycastHit2D groundHit = PickCloserHit(hitDown, PickCloserHit(hitDiagL, hitDiagR));
             RaycastHit2D bestHit = groundHit.collider != null ? groundHit : hitForward;
 
+            // 現在の面と十分に角度差がある前方ヒットだけを「曲がり先候補」として採用する。
             bool allowForwardSnap = hitForward.collider != null
-                                    && Mathf.Abs(moveInput) > 0.01f
-                                    && Vector2.Angle(surfaceNormal, hitForward.normal) >= forwardSnapAngle;
+                && Mathf.Abs(moveInput) > 0.01f
+                && Vector2.Angle(surfaceNormal, hitForward.normal) >= forwardSnapAngle;
 
             if (allowForwardSnap)
             {
@@ -229,19 +371,22 @@ namespace VerbGame
 
             if (bestHit.collider != null)
             {
+                // 面が見つかればその法線を現在値として採用する。
                 surfaceNormal = bestHit.normal;
                 desiredUp = surfaceNormal;
                 isGrounded = true;
             }
             else
             {
+                // 一時的にヒットが消えても向きは急変させず、直前の姿勢を保つ。
                 isGrounded = false;
-                surfaceNormal = Vector2.Lerp(surfaceNormal, desiredUp, Time.fixedDeltaTime * airRealignSpeed);
+                surfaceNormal = desiredUp;
             }
         }
 
         private RaycastHit2D PickCloserHit(RaycastHit2D a, RaycastHit2D b)
         {
+            // null を考慮しつつ、より近いヒットを返す小さなユーティリティ。
             if (a.collider == null) return b;
             if (b.collider == null) return a;
             return a.distance <= b.distance ? a : b;
