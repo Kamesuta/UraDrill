@@ -129,9 +129,6 @@ namespace VerbGame
             // 近傍候補をなめて、最も「前に進めそう」で「今の面と連続性が高い」セルを選ぶ。
             foreach (var offset in Neighbors)
             {
-                // 入力方向に対して前進成分がない候補は捨てる。
-                if (Vector2.Dot(((Vector2)offset).normalized, tangent) <= 0f) continue;
-
                 Vector3Int candidate = currentCell + ToCell(offset);
 
                 // 地面セルには入れない。プレイヤーは常に空セル側を移動する。
@@ -143,9 +140,12 @@ namespace VerbGame
 
                     // スコアは前進成分を最優先しつつ、
                     // 今の面法線に近いものをやや優先して不自然な折れを減らす。
-                    float score = Vector2.Dot(((Vector2)offset).normalized, tangent) * 10f;
+                    // 凹角では前進成分が 0 の候補も必要になるので、ここでは即除外せず減点に留める。
+                    float forward = Vector2.Dot(((Vector2)offset).normalized, tangent);
+                    float score = forward * 10f;
                     score += Vector2.Dot(normal, surfaceNormal) * 2f;
                     score += offset.sqrMagnitude == 1 ? 0.25f : 0f;
+                    if (forward < 0f) score += forward * 4f;
                     if (score <= bestScore) continue;
                     bestScore = score;
                     bestCell = candidate;
