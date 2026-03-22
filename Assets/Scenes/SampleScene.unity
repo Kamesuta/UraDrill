@@ -15867,8 +15867,10 @@ MonoBehaviour:
   snapPositionThreshold: 0.01
   snapAngleThreshold: 0.5
   grid: {fileID: 1148986302}
+  drillTurnDuration: 0.2
   drillSpeed: 5
   drillEnterDistance: 0.1
+  drillStepDistance: 0.05
   groundLayer:
     serializedVersion: 2
     m_Bits: 256
@@ -15981,7 +15983,7 @@ BoxCollider2D:
   m_UsedByEffector: 0
   m_CompositeOperation: 0
   m_CompositeOrder: 0
-  m_Offset: {x: -0.0044851005, y: -0.026910484}
+  m_Offset: {x: -0.0045, y: -0.045}
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0.5, y: 0.5}
@@ -15991,7 +15993,7 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
-  m_Size: {x: 0.8108199, y: 0.9453722}
+  m_Size: {x: 0.8, y: 0.9}
   m_EdgeRadius: 0
 --- !u!1001 &8573640056728954167
 PrefabInstance:
