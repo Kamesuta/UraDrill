@@ -232,6 +232,11 @@ namespace VerbGame
             return GetPanelType(CurrentCell - ToCell(SurfaceNormal)) == WallPanelType.Ice;
         }
 
+        public bool IsTouchingCheckpoint()
+        {
+            return GetPanelType(CurrentCell - ToCell(SurfaceNormal)) == WallPanelType.Checkpoint;
+        }
+
         private bool CanAttachToNonIceSurface(Vector3Int cell, Vector2Int normal)
         {
             // 今向いている面の地形を見て、

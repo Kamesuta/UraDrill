@@ -1,6 +1,8 @@
 using System.Collections.Generic;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 using UnityEngine.Tilemaps;
 
 namespace VerbGame
@@ -36,6 +38,9 @@ namespace VerbGame
         [SerializeField] private AudioClip fallClip;
         [SerializeField] private AudioClip hardWallClip;
 
+        [Header("Goal")]
+        [SerializeField] private float clearDisplayDuration = 1.5f;
+
         // グリッド上の論理移動だけを扱うヘルパー。
         private PlayerGridNavigator navigator;
         // LitMotion と Animator をまとめた見た目担当。
@@ -50,6 +55,8 @@ namespace VerbGame
         private bool isBusy;
         // 効果音専用。PlayOneShot で重ねる。
         private AudioSource sfxSource;
+        // クリア演出中は入力も遷移も1回だけにする。
+        private bool isClearingStage;
 
         private void Awake()
         {
@@ -67,7 +74,7 @@ namespace VerbGame
         private void Update()
         {
             // 参照不足、または何かの演出中なら新しい操作は受け付けない。
-            if (isBusy || grid == null || groundTilemap == null || navigator == null || view == null) return;
+            if (isBusy || isClearingStage || grid == null || groundTilemap == null || navigator == null || view == null) return;
 
             // 氷の壁や天井には張り付けないので、入力より先に重力落下する。
             if (TryStartSlipFall()) return;
@@ -122,10 +129,7 @@ namespace VerbGame
                     () =>
                     {
                         navigator.CommitMove(nextCell, nextNormal);
-                        if (!TryStartSlipFall())
-                        {
-                            isBusy = false;
-                        }
+                        FinishMovementStep();
                     });
                 return;
             }
@@ -141,10 +145,7 @@ namespace VerbGame
                 () =>
                 {
                     navigator.CommitMove(nextCell, nextNormal);
-                    if (!TryStartSlipFall())
-                    {
-                        isBusy = false;
-                    }
+                    FinishMovementStep();
                 });
         }
 
@@ -173,10 +174,7 @@ namespace VerbGame
                     () =>
                     {
                         navigator.FinishDrill(endCell, endNormal);
-                        if (!TryStartSlipFall())
-                        {
-                            isBusy = false;
-                        }
+                        FinishMovementStep();
                     });
                 return true;
             }
@@ -192,10 +190,7 @@ namespace VerbGame
                     // 通常の壁なら出口へ抜け、
                     // 硬い壁なら開始地点へ跳ね返された結果を確定する。
                     navigator.FinishDrill(endCell, endNormal);
-                    if (!TryStartSlipFall())
-                    {
-                        isBusy = false;
-                    }
+                    FinishMovementStep();
                 });
             return true;
         }
@@ -221,9 +216,131 @@ namespace VerbGame
                 {
                     // 落下が終わった位置と張り付き先を論理状態へ反映する。
                     navigator.CommitMove(landingCell, landingNormal);
-                    isBusy = false;
+                    if (!TryHandleStageClear())
+                    {
+                        isBusy = false;
+                    }
                 });
             return true;
+        }
+
+        private void FinishMovementStep()
+        {
+            if (TryStartSlipFall()) return;
+            if (TryHandleStageClear()) return;
+            isBusy = false;
+        }
+
+        private bool TryHandleStageClear()
+        {
+            if (isClearingStage || navigator == null || !navigator.IsTouchingCheckpoint()) return false;
+
+            isClearingStage = true;
+            moveInput = 0f;
+            drillPressed = false;
+            nextMoveTime = 0f;
+            StartCoroutine(ShowClearAndLoadNextScene());
+            return true;
+        }
+
+        private IEnumerator ShowClearAndLoadNextScene()
+        {
+            yield return new WaitForSeconds(clearDisplayDuration);
+
+            if (TryResolveNextScene(out string nextSceneName))
+            {
+                SceneManager.LoadScene(nextSceneName);
+                yield break;
+            }
+
+            Debug.LogWarning($"Next scene was not found from '{SceneManager.GetActiveScene().name}'.");
+            isBusy = false;
+            isClearingStage = false;
+        }
+
+        private bool TryResolveNextScene(out string nextSceneName)
+        {
+            Scene currentScene = SceneManager.GetActiveScene();
+            nextSceneName = string.Empty;
+
+            if (TryBuildIncrementedSceneName(currentScene.name, out string incrementedName) &&
+                HasSceneInBuildSettings(incrementedName))
+            {
+                nextSceneName = incrementedName;
+                return true;
+            }
+
+            int nextBuildIndex = currentScene.buildIndex + 1;
+            if (nextBuildIndex >= 0 && nextBuildIndex < SceneManager.sceneCountInBuildSettings)
+            {
+                string nextScenePath = SceneUtility.GetScenePathByBuildIndex(nextBuildIndex);
+                nextSceneName = System.IO.Path.GetFileNameWithoutExtension(nextScenePath);
+                return !string.IsNullOrEmpty(nextSceneName);
+            }
+
+            return false;
+        }
+
+        private bool HasSceneInBuildSettings(string sceneName)
+        {
+            for (int i = 0; i < SceneManager.sceneCountInBuildSettings; i++)
+            {
+                string scenePath = SceneUtility.GetScenePathByBuildIndex(i);
+                if (System.IO.Path.GetFileNameWithoutExtension(scenePath) == sceneName)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryBuildIncrementedSceneName(string sceneName, out string incrementedName)
+        {
+            incrementedName = string.Empty;
+            if (string.IsNullOrEmpty(sceneName)) return false;
+
+            int suffixStart = sceneName.Length;
+            while (suffixStart > 0 && char.IsDigit(sceneName[suffixStart - 1]))
+            {
+                suffixStart--;
+            }
+
+            if (suffixStart == sceneName.Length) return false;
+
+            string prefix = sceneName.Substring(0, suffixStart);
+            string suffix = sceneName.Substring(suffixStart);
+            if (!int.TryParse(suffix, out int sceneNumber)) return false;
+
+            incrementedName = prefix + (sceneNumber + 1);
+            return true;
+        }
+
+        private void OnGUI()
+        {
+            if (!isClearingStage) return;
+
+            const float width = 420f;
+            const float height = 90f;
+            Rect rect = new(
+                (Screen.width - width) * 0.5f,
+                (Screen.height - height) * 0.5f,
+                width,
+                height);
+
+            GUIStyle style = new(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = 40,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = Color.white }
+            };
+
+            Color previousColor = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, 0.75f);
+            GUI.Box(rect, GUIContent.none);
+            GUI.color = previousColor;
+            GUI.Label(rect, "クリア！", style);
         }
 
         private void EnsureAudioSource()
