@@ -16,11 +16,13 @@ namespace VerbGame
 
         // すべてグリッド移動だが、見た目だけは少し滑らかにしたいので移動時間を持つ。
         [Header("Timing")]
-        [SerializeField] private float moveDuration = 0.12f;
+        [SerializeField] private float moveDuration = 0.15f;
         // 左右を押しっぱなしにした時の次ステップまでの待ち時間。
         [SerializeField] private float moveRepeatDelay = 0.12f;
+        // ドリル開始時に向きを作る Z 軸回転時間。
+        [SerializeField] private float drillRotateDuration = 0.12f;
         // ドリル中は1セルずつ短いモーションで連続再生する。
-        [SerializeField] private float drillStepDuration = 0.05f;
+        [SerializeField] private float drillStepDuration = 0.15f;
 
         // 境界セルの判定に使う4方向。
         // surfaceNormal もこのいずれかを取る前提で実装している。
@@ -181,11 +183,14 @@ namespace VerbGame
             }
             while (HasGround(cell));
 
-            // ここからは連続モーションとして再生する。
+            // まず Z 軸回転だけを行い、向きが決まってからドリル演出と直進を始める。
             isBusy = true;
             drillPathIndex = 0;
-            SetDrilling(true);
-            PlayNextDrillStep();
+            AnimateRotationTo(drillDirection, drillRotateDuration, () =>
+            {
+                SetDrilling(true);
+                PlayNextDrillStep();
+            });
             return true;
         }
         private void StartMove(Vector3Int targetCell, Vector2Int targetNormal, float duration, System.Action onComplete)
@@ -212,10 +217,7 @@ namespace VerbGame
         {
             // ドリルは1セルずつ再生して、完了コールバックで次へ進む。
             Vector3Int step = drillPath[drillPathIndex];
-
-            // 最後の1歩だけ、抜けた先の面法線へ回転させる。
-            Vector2Int stepNormal = drillPathIndex == drillPath.Count - 1 ? drillDirection : surfaceNormal;
-            AnimateTo(step, stepNormal, drillStepDuration, () =>
+            AnimatePositionTo(step, drillStepDuration, () =>
             {
                 drillPathIndex++;
                 if (drillPathIndex < drillPath.Count)
@@ -256,6 +258,47 @@ namespace VerbGame
                     transform.SetPositionAndRotation(
                         Vector3.Lerp(startPos, endPos, progress),
                         Quaternion.Slerp(startRot, endRot, progress));
+                });
+        }
+        private void AnimatePositionTo(Vector3Int targetCell, float duration, System.Action onComplete)
+        {
+            // ドリル中は向きを固定したまま、位置だけ直線補間する。
+            Vector3 startPos = transform.position;
+            Vector3 endPos = GetCellCenter(targetCell);
+            Quaternion fixedRot = transform.rotation;
+
+            activeMotion.TryCancel();
+            activeMotion = LMotion.Create(0f, 1f, duration)
+                .WithOnComplete(() =>
+                {
+                    transform.SetPositionAndRotation(endPos, fixedRot);
+                    onComplete?.Invoke();
+                })
+                .Bind(progress =>
+                {
+                    transform.SetPositionAndRotation(
+                        Vector3.Lerp(startPos, endPos, progress),
+                        fixedRot);
+                });
+        }
+        private void AnimateRotationTo(Vector2Int targetNormal, float duration, System.Action onComplete)
+        {
+            // ドリル開始前は移動せず、その場で Z 軸角だけを補間する。
+            float startZ = transform.eulerAngles.z;
+            float endZ = Quaternion.FromToRotation(Vector3.up, ToWorld(targetNormal)).eulerAngles.z;
+            Vector3 fixedPos = transform.position;
+
+            activeMotion.TryCancel();
+            activeMotion = LMotion.Create(0f, 1f, duration)
+                .WithOnComplete(() =>
+                {
+                    transform.SetPositionAndRotation(fixedPos, Quaternion.Euler(0f, 0f, endZ));
+                    onComplete?.Invoke();
+                })
+                .Bind(progress =>
+                {
+                    float z = Mathf.LerpAngle(startZ, endZ, progress);
+                    transform.SetPositionAndRotation(fixedPos, Quaternion.Euler(0f, 0f, z));
                 });
         }
         private void SnapToNearestBoundary()

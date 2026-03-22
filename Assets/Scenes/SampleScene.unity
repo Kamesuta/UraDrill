@@ -15861,7 +15861,8 @@ MonoBehaviour:
   groundTilemap: {fileID: 1057229881}
   moveDuration: 0.15
   moveRepeatDelay: 0.12
-  drillStepDuration: 0.05
+  drillRotateDuration: 0.12
+  drillStepDuration: 0.15
 --- !u!212 &1946717437
 SpriteRenderer:
   serializedVersion: 2
