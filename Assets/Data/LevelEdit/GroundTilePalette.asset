@@ -15,7 +15,7 @@ MonoBehaviour:
   entries:
   - id: 1
     label: NormalBlock
-    tile: {fileID: 11400000, guid: 5c9e584343046be4c93d74ad8d6bd2a2, type: 2}
+    tile: {fileID: 11400000, guid: 2b45b65cf037f2e4994b3bc5dc263a76, type: 2}
   - id: 2
     label: Ice
     tile: {fileID: 11400000, guid: da12fc97783c6d74e9111b1cf24993a0, type: 2}
