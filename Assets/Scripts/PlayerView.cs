@@ -14,6 +14,11 @@ namespace VerbGame
         private readonly Transform target;
         // Drill アニメーション制御用。無くても落ちない前提。
         private readonly Animator animator;
+        // 左右反転を適用する見た目の Transform。
+        // 今回は Drill 子オブジェクトを見た目本体として使う。
+        private readonly Transform visual;
+        // 反転前のローカルスケール。
+        private readonly Vector3 baseVisualScale;
         // 現在再生中の LitMotion。
         // 新しい演出を始める時は必ず止める。
         private MotionHandle activeMotion;
@@ -22,10 +27,20 @@ namespace VerbGame
         {
             this.target = target;
             this.animator = animator;
+            visual = animator != null ? animator.transform : target;
+            baseVisualScale = visual.localScale;
         }
 
         // 初期スナップや復帰時に、補間なしでその場へ合わせる。
         public void SnapTo(Vector3 position, Quaternion rotation) => target.SetPositionAndRotation(position, rotation);
+
+        // 左右入力に応じて見た目だけ左右反転する。
+        // 地形追従の回転とは分離して、スプライトの向きだけを切り替える。
+        public void SetFacing(int direction)
+        {
+            float sign = direction >= 0 ? -1f : 1f;
+            visual.localScale = new Vector3(Mathf.Abs(baseVisualScale.x) * sign, baseVisualScale.y, baseVisualScale.z);
+        }
 
         public void AnimateStep(Vector3 targetPosition, Quaternion targetRotation, float duration, Action onComplete)
         {

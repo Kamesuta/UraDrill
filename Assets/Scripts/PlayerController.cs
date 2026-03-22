@@ -86,6 +86,7 @@ namespace VerbGame
         {
             // ここからアニメーション完了までは論理状態を進めない。
             isBusy = true;
+            view.SetFacing(moveInput >= 0f ? 1 : -1);
             bool isConvexCornerTurn = navigator.IsConvexCornerTurn(nextCell, nextNormal);
 
             if (!isConvexCornerTurn)
@@ -124,6 +125,7 @@ namespace VerbGame
             if (!navigator.TryBuildDrillPath(out var drillDirection, out List<Vector3Int> drillPath)) return false;
 
             isBusy = true;
+            view.SetFacing(moveInput >= 0f ? 1 : -1);
 
             // 見た目は「先に回転」「次にアニメーションON」「最後に直進」。
             view.RotateThenDrill(
