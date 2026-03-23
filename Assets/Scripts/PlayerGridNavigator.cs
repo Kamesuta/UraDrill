@@ -62,6 +62,38 @@ namespace VerbGame
             }
         }
 
+        public bool TryFindSpawnBoundary(out Vector3Int spawnCell, out Vector2Int spawnNormal)
+        {
+            spawnCell = default;
+            spawnNormal = Vector2Int.up;
+            if (groundTilemap == null) return false;
+
+            BoundsInt bounds = groundTilemap.cellBounds;
+            Vector2Int[] searchOrder = { Vector2Int.up, Vector2Int.right, Vector2Int.left, Vector2Int.down };
+
+            for (int y = bounds.yMin; y < bounds.yMax; y++)
+            {
+                for (int x = bounds.xMin; x < bounds.xMax; x++)
+                {
+                    Vector3Int candidateCell = new(x, y, 0);
+                    if (GetPanelType(candidateCell) != WallPanelType.Spawn) continue;
+
+                    for (int i = 0; i < searchOrder.Length; i++)
+                    {
+                        Vector2Int normal = searchOrder[i];
+                        Vector3Int supportCell = candidateCell - ToCell(normal);
+                        if (!HasGround(supportCell)) continue;
+
+                        spawnCell = candidateCell;
+                        spawnNormal = normal;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
         public bool TryGetNextStep(int direction, out Vector3Int bestCell, out Vector2Int bestNormal)
         {
             // 現在の面法線に直交するベクトルが「壁沿いの進行方向」。
@@ -259,7 +291,14 @@ namespace VerbGame
         // 2D方向をセル座標へ拡張する。
         private Vector3Int ToCell(Vector2Int value) => new(value.x, value.y, 0);
         // そのセルに地形タイルがあるかどうかだけを見る。
-        private bool HasGround(Vector3Int cell) => groundTilemap != null && groundTilemap.GetTile(cell) != null;
+        private bool HasGround(Vector3Int cell)
+        {
+            if (groundTilemap == null) return false;
+
+            TileBase tile = groundTilemap.GetTile(cell);
+            if (tile == null) return false;
+            return GetPanelType(cell) != WallPanelType.Spawn;
+        }
 
         private void BuildHardWallBouncePath(List<Vector3Int> drillPath)
         {

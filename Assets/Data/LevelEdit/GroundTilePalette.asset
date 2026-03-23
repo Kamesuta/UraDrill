@@ -13,6 +13,9 @@ MonoBehaviour:
   m_Name: GroundTilePalette
   m_EditorClassIdentifier: Assembly-CSharp::VerbGame.LevelEditTilePalette
   entries:
+  - id: -1
+    label: Spawn
+    tile: {fileID: 11400000, guid: 7eaf34732493b034286a15b70c13e4e4, type: 2}
   - id: 1
     label: NormalBlock
     tile: {fileID: 11400000, guid: 2b45b65cf037f2e4994b3bc5dc263a76, type: 2}

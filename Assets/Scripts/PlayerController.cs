@@ -69,9 +69,16 @@ namespace VerbGame
             EnsureAudioSource();
             EnsureClearObject();
 
-            // 初期位置は、最寄りの境界セルへ論理的にスナップしてから、
-            // その結果を見た目へそのまま反映する。
-            navigator.SnapToNearestBoundary(transform.position);
+            // Spawn タイルがあればその脇へ出し、
+            // 無ければ従来どおり最寄り境界へスナップする。
+            if (navigator.TryFindSpawnBoundary(out var spawnCell, out var spawnNormal))
+            {
+                navigator.CommitMove(spawnCell, spawnNormal);
+            }
+            else
+            {
+                navigator.SnapToNearestBoundary(transform.position);
+            }
             view.SnapTo(navigator.GetCellCenter(navigator.CurrentCell), navigator.GetRotation(navigator.SurfaceNormal));
         }
 

@@ -24,6 +24,7 @@ namespace VerbGame
         [SerializeField] private Grid grid;
         [SerializeField] private Tilemap groundTilemap;
         [SerializeField] private LevelEditTilePalette tilePalette;
+        [SerializeField] private Transform playerTransform;
 
         [Header("UI")]
         [SerializeField] private GameObject uiRoot;
@@ -31,6 +32,7 @@ namespace VerbGame
         [SerializeField] private Button tileButtonTemplate;
         [SerializeField] private Button pencilButton;
         [SerializeField] private Button eraserButton;
+        [SerializeField] private Button respawnButton;
         [SerializeField] private Button exportButton;
         [SerializeField] private Button importButton;
         [SerializeField] private TMP_Text currentTileLabel;
@@ -80,6 +82,7 @@ namespace VerbGame
         {
             if (pencilButton != null) pencilButton.onClick.AddListener(() => SetTool(EditTool.Pencil));
             if (eraserButton != null) eraserButton.onClick.AddListener(() => SetTool(EditTool.Eraser));
+            if (respawnButton != null) respawnButton.onClick.AddListener(RespawnPlayerToSpawn);
             if (exportButton != null) exportButton.onClick.AddListener(ExportToClipboard);
             if (importButton != null) importButton.onClick.AddListener(ImportFromClipboard);
         }
@@ -202,12 +205,23 @@ namespace VerbGame
             int maxX = Mathf.Max(startCell.x, endCell.x);
             int minY = Mathf.Min(startCell.y, endCell.y);
             int maxY = Mathf.Max(startCell.y, endCell.y);
+            bool isSpawnTile = selectedEntry != null && selectedEntry.id < 0;
+            if (isSpawnTile)
+            {
+                minX = maxX = endCell.x;
+                minY = maxY = endCell.y;
+            }
 
             TileBase tileToPaint = selectedEntry?.tile;
             if (currentTool == EditTool.Pencil && tileToPaint == null)
             {
                 SetMessage("選択タイルなし");
                 return;
+            }
+
+            if (currentTool == EditTool.Pencil && isSpawnTile)
+            {
+                ClearExistingSpawnTiles();
             }
 
             for (int y = minY; y <= maxY; y++)
@@ -220,6 +234,7 @@ namespace VerbGame
             }
 
             groundTilemap.CompressBounds();
+            RefreshSpawnTileVisibility();
             SetMessage($"{currentTool} [{minX},{minY}] - [{maxX},{maxY}]");
         }
 
@@ -244,6 +259,8 @@ namespace VerbGame
             {
                 uiRoot.SetActive(visible);
             }
+
+            RefreshSpawnTileVisibility();
         }
 
         private void ExportToClipboard()
@@ -349,6 +366,7 @@ namespace VerbGame
             }
 
             groundTilemap.CompressBounds();
+            RefreshSpawnTileVisibility();
             SetMessage($"Import {importedCount} tiles");
         }
 
@@ -429,6 +447,18 @@ namespace VerbGame
             iconImage.raycastTarget = false;
         }
 
+        private void RespawnPlayerToSpawn()
+        {
+            if (playerTransform == null || grid == null || !TryFindSpawnCell(out Vector3Int spawnCell))
+            {
+                SetMessage("Spawn not set");
+                return;
+            }
+
+            playerTransform.position = grid.GetCellCenterWorld(spawnCell);
+            SetMessage($"Respawn {spawnCell.x},{spawnCell.y}");
+        }
+
         private static Image GetOrCreateIconImage(Button button)
         {
             Transform existingChild = button.transform.Find("Icon");
@@ -466,6 +496,12 @@ namespace VerbGame
             int maxX = Mathf.Max(startCell.x, endCell.x);
             int minY = Mathf.Min(startCell.y, endCell.y);
             int maxY = Mathf.Max(startCell.y, endCell.y);
+            if (selectedEntry != null && selectedEntry.id < 0)
+            {
+                minX = maxX = endCell.x;
+                minY = maxY = endCell.y;
+            }
+
             int requiredCount = (maxX - minX + 1) * (maxY - minY + 1);
 
             EnsurePreviewPool(requiredCount);
@@ -474,9 +510,11 @@ namespace VerbGame
                 ? GetTileSprite(selectedEntry?.tile) ?? GetFallbackPreviewSprite()
                 : GetFallbackPreviewSprite();
 
-            Color previewColor = currentTool == EditTool.Pencil
-                ? new Color(1f, 1f, 1f, previewAlpha)
-                : new Color(1f, 0.35f, 0.35f, previewAlpha);
+            Color previewColor = currentTool switch
+            {
+                EditTool.Pencil => new Color(1f, 1f, 1f, previewAlpha),
+                EditTool.Eraser => new Color(1f, 0.35f, 0.35f, previewAlpha),
+            };
 
             int index = 0;
             for (int y = minY; y <= maxY; y++)
@@ -538,6 +576,66 @@ namespace VerbGame
             fallbackPreviewSprite = Sprite.Create(texture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 1f);
             fallbackPreviewSprite.name = "EditPreviewSprite";
             return fallbackPreviewSprite;
+        }
+
+        private void ClearExistingSpawnTiles()
+        {
+            if (groundTilemap == null || tilePalette == null) return;
+
+            BoundsInt bounds = groundTilemap.cellBounds;
+            for (int y = bounds.yMin; y < bounds.yMax; y++)
+            {
+                for (int x = bounds.xMin; x < bounds.xMax; x++)
+                {
+                    Vector3Int cell = new(x, y, 0);
+                    TileBase tile = groundTilemap.GetTile(cell);
+                    if (!tilePalette.TryGetEntryByTile(tile, out LevelEditTilePalette.Entry entry) || entry.id >= 0) continue;
+                    groundTilemap.SetTile(cell, null);
+                }
+            }
+        }
+
+        private void RefreshSpawnTileVisibility()
+        {
+            if (groundTilemap == null || tilePalette == null) return;
+
+            BoundsInt bounds = groundTilemap.cellBounds;
+            Color tileColor = isUiVisible ? Color.white : new Color(1f, 1f, 1f, 0f);
+
+            for (int y = bounds.yMin; y < bounds.yMax; y++)
+            {
+                for (int x = bounds.xMin; x < bounds.xMax; x++)
+                {
+                    Vector3Int cell = new(x, y, 0);
+                    TileBase tile = groundTilemap.GetTile(cell);
+                    if (!tilePalette.TryGetEntryByTile(tile, out LevelEditTilePalette.Entry entry) || entry.id >= 0) continue;
+
+                    groundTilemap.SetTileFlags(cell, TileFlags.None);
+                    groundTilemap.SetColor(cell, tileColor);
+                }
+            }
+        }
+
+        private bool TryFindSpawnCell(out Vector3Int spawnCell)
+        {
+            spawnCell = default;
+            if (groundTilemap == null || tilePalette == null) return false;
+
+            BoundsInt bounds = groundTilemap.cellBounds;
+
+            for (int y = bounds.yMin; y < bounds.yMax; y++)
+            {
+                for (int x = bounds.xMin; x < bounds.xMax; x++)
+                {
+                    Vector3Int tileCell = new(x, y, 0);
+                    TileBase tile = groundTilemap.GetTile(tileCell);
+                    if (!tilePalette.TryGetEntryByTile(tile, out LevelEditTilePalette.Entry entry) || entry.id >= 0) continue;
+                    spawnCell = tileCell;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string BuildEntryLabel(LevelEditTilePalette.Entry entry)
