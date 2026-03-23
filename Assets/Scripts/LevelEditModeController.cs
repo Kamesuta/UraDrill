@@ -11,15 +11,18 @@ using Tile = UnityEngine.Tilemaps.Tile;
 
 namespace VerbGame
 {
+    // レベル編集モードの司令塔。
+    // UI の開閉、タイル選択、ドラッグ塗り、CSV 入出力、スポーン表示制御をまとめて担当する。
     public sealed class LevelEditModeController : MonoBehaviour
     {
+        // 今回の編集ツールは最低限の2種類だけ。
         private enum EditTool
         {
             Pencil,
             Eraser,
         }
 
-        [Header("Scene References")]
+        [Header("シーン参照")]
         [SerializeField] private Camera worldCamera;
         [SerializeField] private Grid grid;
         [SerializeField] private Tilemap groundTilemap;
@@ -41,9 +44,11 @@ namespace VerbGame
         [SerializeField] private float previewAlpha = 0.35f;
         [SerializeField] private int previewSortingOrder = 10;
 
+        // ランタイム生成する UI ボタンと、ドラッグ中プレビューの描画プール。
         private readonly List<Button> tileButtons = new();
         private readonly List<SpriteRenderer> previewRenderers = new();
 
+        // 編集モードの現在状態。
         private EditTool currentTool = EditTool.Pencil;
         private LevelEditTilePalette.Entry selectedEntry;
         private bool isUiVisible;
@@ -53,22 +58,27 @@ namespace VerbGame
         private Transform previewRoot;
         private Sprite fallbackPreviewSprite;
 
+        // 起動時に UI と初期状態を組み立てる。
         private void Awake()
         {
+            // 起動時に UI を組み立てておくが、表示自体は閉じた状態から始める。
             BindButtons();
             BuildTileButtons();
             SetUiVisible(false);
             SetTool(EditTool.Pencil);
-            SetMessage("Tab で編集UI");
+            SetMessage("Tabで編集UIを開閉");
         }
 
+        // Tab 開閉と、編集モード中のマウス入力処理をまとめる。
         private void Update()
         {
+            // プレイ中にいつでも Tab で編集 UI を開閉できる。
             if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
             {
                 SetUiVisible(!isUiVisible);
             }
 
+            // UI を閉じている間は入力を無視し、プレビューだけ確実に消す。
             if (!isUiVisible || Mouse.current == null || worldCamera == null || grid == null || groundTilemap == null)
             {
                 HidePreview();
@@ -78,8 +88,10 @@ namespace VerbGame
             HandlePaintingInput();
         }
 
+        // 各 UI ボタンのクリックイベントを配線する。
         private void BindButtons()
         {
+            // 各ボタンはここで一括配線する。
             if (pencilButton != null) pencilButton.onClick.AddListener(() => SetTool(EditTool.Pencil));
             if (eraserButton != null) eraserButton.onClick.AddListener(() => SetTool(EditTool.Eraser));
             if (respawnButton != null) respawnButton.onClick.AddListener(RespawnPlayerToSpawn);
@@ -87,10 +99,12 @@ namespace VerbGame
             if (importButton != null) importButton.onClick.AddListener(ImportFromClipboard);
         }
 
+        // パレットの内容からタイル選択ボタンを動的生成する。
         private void BuildTileButtons()
         {
             if (tileButtonTemplate == null || tileListContent == null || tilePalette == null) return;
 
+            // タイル一覧はテンプレートから横並びで動的生成する。
             ConfigureTileListLayout();
             tileButtonTemplate.gameObject.SetActive(false);
             tileButtons.Clear();
@@ -125,10 +139,12 @@ namespace VerbGame
             }
             else
             {
+                // パレットが空でも UI 表示だけは破綻させない。
                 UpdateCurrentTileLabel();
             }
         }
 
+        // 最初に選ぶタイルを、パレット先頭の有効エントリから決める。
         private void SelectFirstAvailableEntry(IReadOnlyList<LevelEditTilePalette.Entry> entries)
         {
             for (int i = 0; i < entries.Count; i++)
@@ -140,8 +156,10 @@ namespace VerbGame
             }
         }
 
+        // 左クリックの押下、ドラッグ、離した瞬間を見て矩形編集を行う。
         private void HandlePaintingInput()
         {
+            // 押した瞬間にドラッグ開始セルを確定する。
             if (Mouse.current.leftButton.wasPressedThisFrame)
             {
                 if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
@@ -166,6 +184,7 @@ namespace VerbGame
 
             if (TryGetHoveredCell(out Vector3Int hoveredCell))
             {
+                // ドラッグ中は現在位置に合わせてプレビュー矩形を更新し続ける。
                 dragCurrentCell = hoveredCell;
                 UpdatePreview(dragStartCell, dragCurrentCell);
             }
@@ -185,9 +204,12 @@ namespace VerbGame
             HidePreview();
         }
 
+        // マウスカーソル位置を Ground のセル座標へ変換する。
         private bool TryGetHoveredCell(out Vector3Int cell)
         {
             cell = default;
+
+            // 2D グリッド前提なので、マウス位置から z=0 平面との交点を取ってセル化する。
             Vector2 screenPosition = Mouse.current.position.ReadValue();
             Ray ray = worldCamera.ScreenPointToRay(screenPosition);
             float distance = -ray.origin.z / ray.direction.z;
@@ -199,8 +221,10 @@ namespace VerbGame
             return true;
         }
 
+        // ドラッグ範囲に対して配置または破壊を適用する。
         private void ApplyRect(Vector3Int startCell, Vector3Int endCell)
         {
+            // ドラッグ範囲を矩形に正規化する。
             int minX = Mathf.Min(startCell.x, endCell.x);
             int maxX = Mathf.Max(startCell.x, endCell.x);
             int minY = Mathf.Min(startCell.y, endCell.y);
@@ -208,6 +232,7 @@ namespace VerbGame
             bool isSpawnTile = selectedEntry != null && selectedEntry.id < 0;
             if (isSpawnTile)
             {
+                // Spawn だけは矩形塗りではなく単点配置に固定する。
                 minX = maxX = endCell.x;
                 minY = maxY = endCell.y;
             }
@@ -215,12 +240,13 @@ namespace VerbGame
             TileBase tileToPaint = selectedEntry?.tile;
             if (currentTool == EditTool.Pencil && tileToPaint == null)
             {
-                SetMessage("選択タイルなし");
+                SetMessage("選択タイルがありません");
                 return;
             }
 
             if (currentTool == EditTool.Pencil && isSpawnTile)
             {
+                // Spawn は複数あると意味が曖昧になるので、置く前に既存を消す。
                 ClearExistingSpawnTiles();
             }
 
@@ -235,9 +261,10 @@ namespace VerbGame
 
             groundTilemap.CompressBounds();
             RefreshSpawnTileVisibility();
-            SetMessage($"{currentTool} [{minX},{minY}] - [{maxX},{maxY}]");
+            SetMessage($"{GetToolDisplayName(currentTool)} [{minX},{minY}] - [{maxX},{maxY}]");
         }
 
+        // 現在選択中のタイルを差し替え、UI 表示も同期する。
         private void SelectEntry(LevelEditTilePalette.Entry entry)
         {
             selectedEntry = entry;
@@ -245,13 +272,16 @@ namespace VerbGame
             UpdateTileButtonHighlights();
         }
 
+        // 現在ツールを切り替えて、見た目とラベルを更新する。
         private void SetTool(EditTool tool)
         {
+            // ツール切り替え時は見た目とラベルを両方更新する。
             currentTool = tool;
             UpdateToolButtonState();
             UpdateCurrentTileLabel();
         }
 
+        // 編集 UI の表示切替と、Spawn タイルの可視状態を同期する。
         private void SetUiVisible(bool visible)
         {
             isUiVisible = visible;
@@ -260,24 +290,27 @@ namespace VerbGame
                 uiRoot.SetActive(visible);
             }
 
+            // Spawn タイルは編集時だけ見せる。
             RefreshSpawnTileVisibility();
         }
 
+        // Ground 全体を CSV にしてクリップボードへ書き出す。
         private void ExportToClipboard()
         {
             if (groundTilemap == null || tilePalette == null)
             {
-                SetMessage("Export failed");
+                SetMessage("エクスポートに失敗しました");
                 return;
             }
 
             BoundsInt bounds = groundTilemap.cellBounds;
             if (bounds.size.x <= 0 || bounds.size.y <= 0)
             {
-                SetMessage("Ground empty");
+                SetMessage("Ground にタイルがありません");
                 return;
             }
 
+            // 1 行目は bounds、2 行目以降はタイル ID の表にする。
             StringBuilder csv = new();
             csv.Append(bounds.xMin).Append(',').Append(bounds.yMin).Append(',').Append(bounds.size.x).Append(',').Append(bounds.size.y);
 
@@ -300,28 +333,29 @@ namespace VerbGame
             }
 
             GUIUtility.systemCopyBuffer = csv.ToString();
-            SetMessage($"Export {bounds.size.x}x{bounds.size.y} CSV");
+            SetMessage($"CSVをコピーしました: {bounds.size.x}x{bounds.size.y}");
         }
 
+        // クリップボードの CSV を読んで Ground タイルを復元する。
         private void ImportFromClipboard()
         {
             if (groundTilemap == null || tilePalette == null)
             {
-                SetMessage("Import failed");
+                SetMessage("インポートに失敗しました");
                 return;
             }
 
             string csv = GUIUtility.systemCopyBuffer;
             if (string.IsNullOrWhiteSpace(csv))
             {
-                SetMessage("Clipboard empty");
+                SetMessage("クリップボードが空です");
                 return;
             }
 
             string[] lines = csv.Replace("\r", string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length < 2)
             {
-                SetMessage("CSV invalid");
+                SetMessage("CSV の形式が不正です");
                 return;
             }
 
@@ -334,10 +368,11 @@ namespace VerbGame
                 width <= 0 ||
                 height <= 0)
             {
-                SetMessage("CSV header invalid");
+                SetMessage("CSV ヘッダーが不正です");
                 return;
             }
 
+            // いったん全消ししてから CSV 内容を敷き直す。
             groundTilemap.ClearAllTiles();
 
             int importedCount = 0;
@@ -367,29 +402,32 @@ namespace VerbGame
 
             groundTilemap.CompressBounds();
             RefreshSpawnTileVisibility();
-            SetMessage($"Import {importedCount} tiles");
+            SetMessage($"CSVを読み込みました: {importedCount} タイル");
         }
 
+        // 現在ツールと選択タイル名を UI ラベルへ反映する。
         private void UpdateCurrentTileLabel()
         {
             if (currentTileLabel == null) return;
 
             if (currentTool == EditTool.Eraser)
             {
-                currentTileLabel.text = "Tool: Eraser";
+                currentTileLabel.text = "ツール: 破壊";
                 return;
             }
 
-            string tileName = selectedEntry != null ? BuildEntryLabel(selectedEntry) : "None";
-            currentTileLabel.text = $"Tool: Pencil / Tile: {tileName}";
+            string tileName = selectedEntry != null ? BuildEntryLabel(selectedEntry) : "なし";
+            currentTileLabel.text = $"ツール: 配置 / タイル: {tileName}";
         }
 
+        // ツールボタンの強調表示を更新する。
         private void UpdateToolButtonState()
         {
             SetButtonColor(pencilButton, currentTool == EditTool.Pencil ? new Color(0.28f, 0.55f, 0.82f, 1f) : new Color(0.18f, 0.18f, 0.18f, 0.95f));
             SetButtonColor(eraserButton, currentTool == EditTool.Eraser ? new Color(0.82f, 0.38f, 0.28f, 1f) : new Color(0.18f, 0.18f, 0.18f, 0.95f));
         }
 
+        // 選択中タイルのボタンだけ色を変えて分かるようにする。
         private void UpdateTileButtonHighlights()
         {
             for (int i = 0; i < tileButtons.Count; i++)
@@ -402,8 +440,10 @@ namespace VerbGame
             }
         }
 
+        // タイル一覧コンテナを横並びレイアウトに整える。
         private void ConfigureTileListLayout()
         {
+            // タイル一覧は横スクロール前提の横並び。
             if (!tileListContent.TryGetComponent<HorizontalLayoutGroup>(out var horizontalLayout))
             {
                 horizontalLayout = tileListContent.gameObject.AddComponent<HorizontalLayoutGroup>();
@@ -423,8 +463,10 @@ namespace VerbGame
             }
         }
 
+        // タイル選択ボタンにスプライト見た目を設定する。
         private void ConfigureTileButtonVisual(Button button, LevelEditTilePalette.Entry entry)
         {
+            // テキストではなくスプライトそのものを見せる。
             RectTransform rectTransform = button.transform as RectTransform;
             if (rectTransform != null)
             {
@@ -447,18 +489,20 @@ namespace VerbGame
             iconImage.raycastTarget = false;
         }
 
+        // いま置かれている Spawn タイル位置へプレイヤーを戻す。
         private void RespawnPlayerToSpawn()
         {
             if (playerTransform == null || grid == null || !TryFindSpawnCell(out Vector3Int spawnCell))
             {
-                SetMessage("Spawn not set");
+                SetMessage("Spawn が未配置です");
                 return;
             }
 
             playerTransform.position = grid.GetCellCenterWorld(spawnCell);
-            SetMessage($"Respawn {spawnCell.x},{spawnCell.y}");
+            SetMessage($"Spawn へ戻しました: {spawnCell.x},{spawnCell.y}");
         }
 
+        // ボタン内のアイコン Image を取得し、無ければ生成する。
         private static Image GetOrCreateIconImage(Button button)
         {
             Transform existingChild = button.transform.Find("Icon");
@@ -479,11 +523,13 @@ namespace VerbGame
             return iconObject.GetComponent<Image>();
         }
 
+        // Tile アセットから表示用スプライトを取り出す。
         private static Sprite GetTileSprite(TileBase tileBase)
         {
             return tileBase is Tile tile ? tile.sprite : null;
         }
 
+        // ドラッグ中の矩形プレビューを更新する。
         private void UpdatePreview(Vector3Int startCell, Vector3Int endCell)
         {
             if (!isUiVisible)
@@ -498,6 +544,7 @@ namespace VerbGame
             int maxY = Mathf.Max(startCell.y, endCell.y);
             if (selectedEntry != null && selectedEntry.id < 0)
             {
+                // Spawn プレビューだけは最後に指している 1 マスだけ見せる。
                 minX = maxX = endCell.x;
                 minY = maxY = endCell.y;
             }
@@ -535,10 +582,12 @@ namespace VerbGame
             }
         }
 
+        // 必要数ぶんのプレビュー用 SpriteRenderer を確保する。
         private void EnsurePreviewPool(int requiredCount)
         {
             if (previewRoot == null)
             {
+                // プレビューは専用ルート配下にまとめて生成する。
                 GameObject root = new("EditPreview");
                 root.transform.SetParent(transform, false);
                 previewRoot = root.transform;
@@ -555,6 +604,7 @@ namespace VerbGame
             }
         }
 
+        // いま出ているプレビューをすべて隠す。
         private void HidePreview()
         {
             for (int i = 0; i < previewRenderers.Count; i++)
@@ -566,6 +616,7 @@ namespace VerbGame
             }
         }
 
+        // プレビュー用の簡易白スプライトを遅延生成で作る。
         private Sprite GetFallbackPreviewSprite()
         {
             if (fallbackPreviewSprite != null) return fallbackPreviewSprite;
@@ -578,10 +629,12 @@ namespace VerbGame
             return fallbackPreviewSprite;
         }
 
+        // 既存の Spawn タイルを全消去して 1 個だけに保つ。
         private void ClearExistingSpawnTiles()
         {
             if (groundTilemap == null || tilePalette == null) return;
 
+            // Spawn は 1 個だけに保つ。
             BoundsInt bounds = groundTilemap.cellBounds;
             for (int y = bounds.yMin; y < bounds.yMax; y++)
             {
@@ -595,10 +648,12 @@ namespace VerbGame
             }
         }
 
+        // Spawn タイルだけ、編集モード時に見せて通常時は隠す。
         private void RefreshSpawnTileVisibility()
         {
             if (groundTilemap == null || tilePalette == null) return;
 
+            // Spawn はデータとしては常に存在するが、通常プレイ中は視覚ノイズになるので隠す。
             BoundsInt bounds = groundTilemap.cellBounds;
             Color tileColor = isUiVisible ? Color.white : new Color(1f, 1f, 1f, 0f);
 
@@ -616,11 +671,13 @@ namespace VerbGame
             }
         }
 
+        // Ground 上から Spawn タイルのセルを探して返す。
         private bool TryFindSpawnCell(out Vector3Int spawnCell)
         {
             spawnCell = default;
             if (groundTilemap == null || tilePalette == null) return false;
 
+            // Ground 上に置かれた Spawn タイルそのもののセルを返す。
             BoundsInt bounds = groundTilemap.cellBounds;
 
             for (int y = bounds.yMin; y < bounds.yMax; y++)
@@ -638,19 +695,22 @@ namespace VerbGame
             return false;
         }
 
+        // タイル選択欄に出す表示名を ID 付きで組み立てる。
         private static string BuildEntryLabel(LevelEditTilePalette.Entry entry)
         {
-            if (entry == null) return "None";
+            if (entry == null) return "なし";
 
             string label = string.IsNullOrWhiteSpace(entry.label) ? $"ID {entry.id}" : entry.label.Trim();
             return $"{entry.id}: {label}";
         }
 
+        // CSV 1 行を単純なカンマ区切りで分解する。
         private static string[] SplitCsvLine(string line)
         {
             return line.Split(',', StringSplitOptions.None);
         }
 
+        // ボタン背景色を安全に差し替える共通処理。
         private void SetButtonColor(Button button, Color color)
         {
             if (button == null) return;
@@ -661,12 +721,24 @@ namespace VerbGame
             }
         }
 
+        // 画面下メッセージ欄へ短い状態表示を出す。
         private void SetMessage(string message)
         {
             if (messageLabel != null)
             {
                 messageLabel.text = message;
             }
+        }
+
+        // 内部ツール名を UI 向けの日本語表示へ変換する。
+        private static string GetToolDisplayName(EditTool tool)
+        {
+            return tool switch
+            {
+                EditTool.Pencil => "配置",
+                EditTool.Eraser => "破壊",
+                _ => tool.ToString(),
+            };
         }
     }
 }
