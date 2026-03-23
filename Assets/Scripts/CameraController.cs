@@ -1,5 +1,7 @@
 using UnityEngine;
 
+// カメラの追従と、背景パララックスをまとめて担当する。
+// 通常はプレイヤーへ追従し、編集モード中だけ手動パンへ切り替えられる。
 public class CameraController : MonoBehaviour
 {
     public Transform target; // 追従するターゲット（プレイヤー）
@@ -14,7 +16,10 @@ public class CameraController : MonoBehaviour
     private Vector3 velocity = Vector3.zero;
     private Vector3 initialCameraPosition;
     private Vector3 initialBackgroundPosition;
+    // false の間は追従を止めて、外部から位置を直接動かす。
+    private bool followEnabled = true;
 
+    // 初期位置を覚えて、背景の相対移動計算に使う。
     private void Awake()
     {
         initialCameraPosition = transform.position;
@@ -25,9 +30,10 @@ public class CameraController : MonoBehaviour
         }
     }
 
+    // 通常時は target へ滑らかに追従する。
     private void LateUpdate()
     {
-        if (target == null)
+        if (!followEnabled || target == null)
             return;
 
         // 目標とするカメラの位置
@@ -40,6 +46,35 @@ public class CameraController : MonoBehaviour
         UpdateBackgroundParallax();
     }
 
+    // 追従の ON/OFF を切り替える。
+    public void SetFollowEnabled(bool enabled)
+    {
+        followEnabled = enabled;
+        velocity = Vector3.zero;
+    }
+
+    // 編集モードのパン用。追従を止めて任意位置へ即座に動かす。
+    public void SetManualPosition(Vector3 position)
+    {
+        followEnabled = false;
+        velocity = Vector3.zero;
+        transform.position = position;
+        UpdateBackgroundParallax();
+    }
+
+    // 手動パン後に、プレイヤー追従へ戻す。
+    public void ResumeFollowToTarget()
+    {
+        if (target == null)
+            return;
+
+        followEnabled = true;
+        velocity = Vector3.zero;
+        transform.position = target.position + offset;
+        UpdateBackgroundParallax();
+    }
+
+    // カメラ移動量に応じて背景を遅れて動かし、奥行き感を出す。
     private void UpdateBackgroundParallax()
     {
         if (backgroundGrid == null)

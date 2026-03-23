@@ -15,15 +15,9 @@ namespace VerbGame
     // UI の開閉、タイル選択、ドラッグ塗り、CSV 入出力、スポーン表示制御をまとめて担当する。
     public sealed class LevelEditModeController : MonoBehaviour
     {
-        // 今回の編集ツールは最低限の2種類だけ。
-        private enum EditTool
-        {
-            Pencil,
-            Eraser,
-        }
-
         [Header("シーン参照")]
         [SerializeField] private Camera worldCamera;
+        [SerializeField] private CameraController cameraController;
         [SerializeField] private Grid grid;
         [SerializeField] private Tilemap groundTilemap;
         [SerializeField] private LevelEditTilePalette tilePalette;
@@ -33,12 +27,9 @@ namespace VerbGame
         [SerializeField] private GameObject uiRoot;
         [SerializeField] private RectTransform tileListContent;
         [SerializeField] private Button tileButtonTemplate;
-        [SerializeField] private Button pencilButton;
-        [SerializeField] private Button eraserButton;
         [SerializeField] private Button respawnButton;
         [SerializeField] private Button exportButton;
         [SerializeField] private Button importButton;
-        [SerializeField] private TMP_Text currentTileLabel;
         [SerializeField] private TMP_Text messageLabel;
         [SerializeField] private float tileIconSize = 48f;
         [SerializeField] private float previewAlpha = 0.35f;
@@ -46,15 +37,20 @@ namespace VerbGame
 
         // ランタイム生成する UI ボタンと、ドラッグ中プレビューの描画プール。
         private readonly List<Button> tileButtons = new();
+        private readonly List<LevelEditTilePalette.Entry> selectableEntries = new();
         private readonly List<SpriteRenderer> previewRenderers = new();
 
         // 編集モードの現在状態。
-        private EditTool currentTool = EditTool.Pencil;
         private LevelEditTilePalette.Entry selectedEntry;
         private bool isUiVisible;
         private bool isDragging;
+        private bool isDestroyDragging;
+        private bool isMiddleButtonHeld;
+        private bool isMiddleDragPanning;
         private Vector3Int dragStartCell;
         private Vector3Int dragCurrentCell;
+        private Vector2 middlePressScreenPosition;
+        private Vector3 cameraPanStartPosition;
         private Transform previewRoot;
         private Sprite fallbackPreviewSprite;
 
@@ -62,11 +58,15 @@ namespace VerbGame
         private void Awake()
         {
             // 起動時に UI を組み立てておくが、表示自体は閉じた状態から始める。
+            if (cameraController == null && worldCamera != null)
+            {
+                cameraController = worldCamera.GetComponent<CameraController>();
+            }
+
             BindButtons();
             BuildTileButtons();
             SetUiVisible(false);
-            SetTool(EditTool.Pencil);
-            SetMessage("Tabで編集UIを開閉");
+            SetMessage(string.Empty);
         }
 
         // Tab 開閉と、編集モード中のマウス入力処理をまとめる。
@@ -85,6 +85,8 @@ namespace VerbGame
                 return;
             }
 
+            HandleCameraInput();
+            HandleScrollSelection();
             HandlePaintingInput();
         }
 
@@ -92,8 +94,6 @@ namespace VerbGame
         private void BindButtons()
         {
             // 各ボタンはここで一括配線する。
-            if (pencilButton != null) pencilButton.onClick.AddListener(() => SetTool(EditTool.Pencil));
-            if (eraserButton != null) eraserButton.onClick.AddListener(() => SetTool(EditTool.Eraser));
             if (respawnButton != null) respawnButton.onClick.AddListener(RespawnPlayerToSpawn);
             if (exportButton != null) exportButton.onClick.AddListener(ExportToClipboard);
             if (importButton != null) importButton.onClick.AddListener(ImportFromClipboard);
@@ -108,6 +108,7 @@ namespace VerbGame
             ConfigureTileListLayout();
             tileButtonTemplate.gameObject.SetActive(false);
             tileButtons.Clear();
+            selectableEntries.Clear();
 
             IReadOnlyList<LevelEditTilePalette.Entry> entries = tilePalette.Entries;
             if (entries == null) return;
@@ -130,6 +131,7 @@ namespace VerbGame
                     label.gameObject.SetActive(false);
                 }
 
+                selectableEntries.Add(entry);
                 tileButtons.Add(button);
             }
 
@@ -139,8 +141,8 @@ namespace VerbGame
             }
             else
             {
-                // パレットが空でも UI 表示だけは破綻させない。
-                UpdateCurrentTileLabel();
+                // パレットが空でも操作説明だけは表示する。
+                SetMessage(string.Empty);
             }
         }
 
@@ -156,11 +158,83 @@ namespace VerbGame
             }
         }
 
-        // 左クリックの押下、ドラッグ、離した瞬間を見て矩形編集を行う。
+        // 中クリックのドラッグでパンし、チョン押しならプレイヤー追従へ戻す。
+        private void HandleCameraInput()
+        {
+            if (Mouse.current == null || worldCamera == null) return;
+
+            if (Mouse.current.middleButton.wasPressedThisFrame)
+            {
+                isMiddleButtonHeld = true;
+                isMiddleDragPanning = false;
+                middlePressScreenPosition = Mouse.current.position.ReadValue();
+                cameraPanStartPosition = worldCamera.transform.position;
+            }
+
+            if (!isMiddleButtonHeld)
+            {
+                return;
+            }
+
+            Vector2 currentScreenPosition = Mouse.current.position.ReadValue();
+            if (!isMiddleDragPanning && (currentScreenPosition - middlePressScreenPosition).sqrMagnitude >= 25f)
+            {
+                isMiddleDragPanning = true;
+                cameraController?.SetFollowEnabled(false);
+            }
+
+            if (isMiddleDragPanning)
+            {
+                Vector3 targetCameraPosition = cameraPanStartPosition + GetCameraPanDelta(middlePressScreenPosition, currentScreenPosition);
+                targetCameraPosition.z = cameraPanStartPosition.z;
+
+                if (cameraController != null)
+                {
+                    cameraController.SetManualPosition(targetCameraPosition);
+                }
+                else
+                {
+                    worldCamera.transform.position = targetCameraPosition;
+                }
+            }
+
+            if (!Mouse.current.middleButton.wasReleasedThisFrame)
+            {
+                return;
+            }
+
+            bool wasPanning = isMiddleDragPanning;
+            isMiddleButtonHeld = false;
+            isMiddleDragPanning = false;
+
+            if (!wasPanning)
+            {
+                ReturnCameraFollowToPlayer();
+            }
+        }
+
+        // ホイール上下で選択タイルを前後に切り替える。
+        private void HandleScrollSelection()
+        {
+            if (Mouse.current == null || selectableEntries.Count == 0) return;
+
+            float scrollY = Mouse.current.scroll.ReadValue().y;
+            if (Mathf.Abs(scrollY) < 0.01f) return;
+
+            SelectEntryByOffset(scrollY > 0f ? -1 : 1);
+        }
+
+        // 左クリックで配置、右クリックで破壊の矩形編集を行う。
         private void HandlePaintingInput()
         {
-            // 押した瞬間にドラッグ開始セルを確定する。
-            if (Mouse.current.leftButton.wasPressedThisFrame)
+            if (Mouse.current == null || Mouse.current.middleButton.isPressed)
+            {
+                return;
+            }
+
+            bool placePressed = Mouse.current.leftButton.wasPressedThisFrame;
+            bool destroyPressed = Mouse.current.rightButton.wasPressedThisFrame;
+            if (placePressed || destroyPressed)
             {
                 if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
                 {
@@ -173,6 +247,7 @@ namespace VerbGame
                 }
 
                 isDragging = true;
+                isDestroyDragging = destroyPressed;
                 dragCurrentCell = dragStartCell;
                 UpdatePreview(dragStartCell, dragCurrentCell);
             }
@@ -189,7 +264,10 @@ namespace VerbGame
                 UpdatePreview(dragStartCell, dragCurrentCell);
             }
 
-            if (!Mouse.current.leftButton.wasReleasedThisFrame)
+            bool dragReleased = isDestroyDragging
+                ? Mouse.current.rightButton.wasReleasedThisFrame
+                : Mouse.current.leftButton.wasReleasedThisFrame;
+            if (!dragReleased)
             {
                 return;
             }
@@ -200,7 +278,7 @@ namespace VerbGame
                 dragEndCell = dragStartCell;
             }
 
-            ApplyRect(dragStartCell, dragEndCell);
+            ApplyRect(dragStartCell, dragEndCell, isDestroyDragging);
             HidePreview();
         }
 
@@ -222,7 +300,7 @@ namespace VerbGame
         }
 
         // ドラッグ範囲に対して配置または破壊を適用する。
-        private void ApplyRect(Vector3Int startCell, Vector3Int endCell)
+        private void ApplyRect(Vector3Int startCell, Vector3Int endCell, bool destroyTiles)
         {
             // ドラッグ範囲を矩形に正規化する。
             int minX = Mathf.Min(startCell.x, endCell.x);
@@ -230,7 +308,7 @@ namespace VerbGame
             int minY = Mathf.Min(startCell.y, endCell.y);
             int maxY = Mathf.Max(startCell.y, endCell.y);
             bool isSpawnTile = selectedEntry != null && selectedEntry.id < 0;
-            if (isSpawnTile)
+            if (!destroyTiles && isSpawnTile)
             {
                 // Spawn だけは矩形塗りではなく単点配置に固定する。
                 minX = maxX = endCell.x;
@@ -238,13 +316,13 @@ namespace VerbGame
             }
 
             TileBase tileToPaint = selectedEntry?.tile;
-            if (currentTool == EditTool.Pencil && tileToPaint == null)
+            if (!destroyTiles && tileToPaint == null)
             {
                 SetMessage("選択タイルがありません");
                 return;
             }
 
-            if (currentTool == EditTool.Pencil && isSpawnTile)
+            if (!destroyTiles && isSpawnTile)
             {
                 // Spawn は複数あると意味が曖昧になるので、置く前に既存を消す。
                 ClearExistingSpawnTiles();
@@ -255,30 +333,37 @@ namespace VerbGame
                 for (int x = minX; x <= maxX; x++)
                 {
                     Vector3Int cell = new(x, y, 0);
-                    groundTilemap.SetTile(cell, currentTool == EditTool.Pencil ? tileToPaint : null);
+                    groundTilemap.SetTile(cell, destroyTiles ? null : tileToPaint);
                 }
             }
 
             groundTilemap.CompressBounds();
             RefreshSpawnTileVisibility();
-            SetMessage($"{GetToolDisplayName(currentTool)} [{minX},{minY}] - [{maxX},{maxY}]");
+            SetMessage($"{(destroyTiles ? "破壊" : "配置")} [{minX},{minY}] - [{maxX},{maxY}]");
         }
 
         // 現在選択中のタイルを差し替え、UI 表示も同期する。
         private void SelectEntry(LevelEditTilePalette.Entry entry)
         {
             selectedEntry = entry;
-            UpdateCurrentTileLabel();
+            SetMessage(string.Empty);
             UpdateTileButtonHighlights();
         }
 
-        // 現在ツールを切り替えて、見た目とラベルを更新する。
-        private void SetTool(EditTool tool)
+        // ホイール操作で選択タイルを前後に送る。
+        private void SelectEntryByOffset(int offset)
         {
-            // ツール切り替え時は見た目とラベルを両方更新する。
-            currentTool = tool;
-            UpdateToolButtonState();
-            UpdateCurrentTileLabel();
+            if (selectableEntries.Count == 0) return;
+
+            int currentIndex = selectedEntry != null ? selectableEntries.IndexOf(selectedEntry) : -1;
+            if (currentIndex < 0)
+            {
+                SelectEntry(selectableEntries[0]);
+                return;
+            }
+
+            int nextIndex = (currentIndex + offset + selectableEntries.Count) % selectableEntries.Count;
+            SelectEntry(selectableEntries[nextIndex]);
         }
 
         // 編集 UI の表示切替と、Spawn タイルの可視状態を同期する。
@@ -405,28 +490,6 @@ namespace VerbGame
             SetMessage($"CSVを読み込みました: {importedCount} タイル");
         }
 
-        // 現在ツールと選択タイル名を UI ラベルへ反映する。
-        private void UpdateCurrentTileLabel()
-        {
-            if (currentTileLabel == null) return;
-
-            if (currentTool == EditTool.Eraser)
-            {
-                currentTileLabel.text = "ツール: 破壊";
-                return;
-            }
-
-            string tileName = selectedEntry != null ? BuildEntryLabel(selectedEntry) : "なし";
-            currentTileLabel.text = $"ツール: 配置 / タイル: {tileName}";
-        }
-
-        // ツールボタンの強調表示を更新する。
-        private void UpdateToolButtonState()
-        {
-            SetButtonColor(pencilButton, currentTool == EditTool.Pencil ? new Color(0.28f, 0.55f, 0.82f, 1f) : new Color(0.18f, 0.18f, 0.18f, 0.95f));
-            SetButtonColor(eraserButton, currentTool == EditTool.Eraser ? new Color(0.82f, 0.38f, 0.28f, 1f) : new Color(0.18f, 0.18f, 0.18f, 0.95f));
-        }
-
         // 選択中タイルのボタンだけ色を変えて分かるようにする。
         private void UpdateTileButtonHighlights()
         {
@@ -542,7 +605,7 @@ namespace VerbGame
             int maxX = Mathf.Max(startCell.x, endCell.x);
             int minY = Mathf.Min(startCell.y, endCell.y);
             int maxY = Mathf.Max(startCell.y, endCell.y);
-            if (selectedEntry != null && selectedEntry.id < 0)
+            if (!isDestroyDragging && selectedEntry != null && selectedEntry.id < 0)
             {
                 // Spawn プレビューだけは最後に指している 1 マスだけ見せる。
                 minX = maxX = endCell.x;
@@ -553,15 +616,13 @@ namespace VerbGame
 
             EnsurePreviewPool(requiredCount);
 
-            Sprite previewSprite = currentTool == EditTool.Pencil
+            Sprite previewSprite = !isDestroyDragging
                 ? GetTileSprite(selectedEntry?.tile) ?? GetFallbackPreviewSprite()
                 : GetFallbackPreviewSprite();
 
-            Color previewColor = currentTool switch
-            {
-                EditTool.Pencil => new Color(1f, 1f, 1f, previewAlpha),
-                EditTool.Eraser => new Color(1f, 0.35f, 0.35f, previewAlpha),
-            };
+            Color previewColor = isDestroyDragging
+                ? new Color(1f, 0.35f, 0.35f, previewAlpha)
+                : new Color(1f, 1f, 1f, previewAlpha);
 
             int index = 0;
             for (int y = minY; y <= maxY; y++)
@@ -671,6 +732,34 @@ namespace VerbGame
             }
         }
 
+        // スクリーン座標差分を、カメラ移動量のワールド差分へ変換する。
+        private Vector3 GetCameraPanDelta(Vector2 startScreenPosition, Vector2 currentScreenPosition)
+        {
+            float depth = Mathf.Abs(worldCamera.transform.position.z);
+            Vector3 startWorld = worldCamera.ScreenToWorldPoint(new Vector3(startScreenPosition.x, startScreenPosition.y, depth));
+            Vector3 currentWorld = worldCamera.ScreenToWorldPoint(new Vector3(currentScreenPosition.x, currentScreenPosition.y, depth));
+            return startWorld - currentWorld;
+        }
+
+        // 中クリックのチョン押し時に、カメラをプレイヤー追従へ戻す。
+        private void ReturnCameraFollowToPlayer()
+        {
+            if (cameraController != null)
+            {
+                cameraController.ResumeFollowToTarget();
+                SetMessage("プレイヤー追従に戻しました");
+                return;
+            }
+
+            if (worldCamera != null && playerTransform != null)
+            {
+                Vector3 position = playerTransform.position;
+                position.z = worldCamera.transform.position.z;
+                worldCamera.transform.position = position;
+                SetMessage("プレイヤー追従に戻しました");
+            }
+        }
+
         // Ground 上から Spawn タイルのセルを探して返す。
         private bool TryFindSpawnCell(out Vector3Int spawnCell)
         {
@@ -726,19 +815,11 @@ namespace VerbGame
         {
             if (messageLabel != null)
             {
-                messageLabel.text = message;
+                string operationGuide = "左:配置 / 右:破壊 / 中ドラッグ:パン / 中クリック:追従 / ホイール:切替";
+                messageLabel.text = string.IsNullOrWhiteSpace(message)
+                    ? operationGuide
+                    : $"{operationGuide}\n{message}";
             }
-        }
-
-        // 内部ツール名を UI 向けの日本語表示へ変換する。
-        private static string GetToolDisplayName(EditTool tool)
-        {
-            return tool switch
-            {
-                EditTool.Pencil => "配置",
-                EditTool.Eraser => "破壊",
-                _ => tool.ToString(),
-            };
         }
     }
 }
