@@ -414,7 +414,7 @@ MonoBehaviour:
   cameraController: {fileID: 0}
   grid: {fileID: 0}
   groundTilemap: {fileID: 0}
-  tilePalette: {fileID: 11400000, guid: 5a743a4d1596e90439d4c2456edb71f7, type: 2}
+  tileCatalog: {fileID: 11400000, guid: d146e78d2a5ed7445902f14004d31c15, type: 2}
   playerTransform: {fileID: 0}
   uiRoot: {fileID: 4325440782277107033}
   tileListContent: {fileID: 2600550325731110469}

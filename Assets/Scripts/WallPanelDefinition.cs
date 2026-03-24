@@ -6,22 +6,27 @@ namespace VerbGame
     [CreateAssetMenu(fileName = "WallPanelDefinition", menuName = "VerbGame/Walls/Wall Panel Definition")]
     public sealed class WallPanelDefinition : ScriptableObject
     {
-        [SerializeField] private WallPanelType panelType = WallPanelType.Default;
-        [SerializeField] private TileBase[] tiles;
+        [SerializeField] private int id;
+        [SerializeField] private string label;
+        [SerializeField] private TileBase tile;
+        [SerializeField] private DrillBehavior drillBehavior = DrillBehavior.Normal;
+        [SerializeField] private SlipBehavior slipBehavior = SlipBehavior.None;
+        [SerializeField] private bool isGoal;
+        [SerializeField] private bool isSpawn;
 
-        public WallPanelType PanelType => panelType;
-        public TileBase[] Tiles => tiles;
+        public int Id => id;
+        public string Label => label;
+        public TileBase Tile => tile;
+        public DrillBehavior DrillBehavior => drillBehavior;
+        public SlipBehavior SlipBehavior => slipBehavior;
+        public bool IsGoal => isGoal;
+        public bool IsSpawn => isSpawn;
+        public bool CausesSlip => slipBehavior == SlipBehavior.Slip;
+        public bool BouncesDrill => drillBehavior == DrillBehavior.Bounce;
 
-        public bool Contains(TileBase tile)
+        public bool Matches(TileBase candidate)
         {
-            if (tile == null || tiles == null) return false;
-
-            for (int i = 0; i < tiles.Length; i++)
-            {
-                if (tiles[i] == tile) return true;
-            }
-
-            return false;
+            return tile != null && tile == candidate;
         }
     }
 }

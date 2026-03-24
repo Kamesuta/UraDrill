@@ -69,17 +69,7 @@ namespace VerbGame
             EnsureAudioSource();
             EnsureClearObject();
 
-            // Spawn タイルがあればその脇へ出し、
-            // 無ければ従来どおり最寄り境界へスナップする。
-            if (navigator.TryFindSpawnBoundary(out var spawnCell, out var spawnNormal))
-            {
-                navigator.CommitMove(spawnCell, spawnNormal);
-            }
-            else
-            {
-                navigator.SnapToNearestBoundary(transform.position);
-            }
-            view.SnapTo(navigator.GetCellCenter(navigator.CurrentCell), navigator.GetRotation(navigator.SurfaceNormal));
+            RespawnToSpawn();
         }
 
         private void Update()
@@ -367,6 +357,33 @@ namespace VerbGame
         {
             if (sfxSource == null || clip == null) return;
             sfxSource.PlayOneShot(clip);
+        }
+
+        public bool RespawnToSpawn()
+        {
+            if (navigator == null || view == null) return false;
+
+            view.Stop();
+            isBusy = false;
+            isClearingStage = false;
+            moveInput = 0f;
+            drillPressed = false;
+            nextMoveTime = 0f;
+            SetClearVisible(false);
+
+            // Spawn タイルがあればその脇へ出し、
+            // 無ければ従来どおり最寄り境界へスナップする。
+            if (navigator.TryFindSpawnBoundary(out var spawnCell, out var spawnNormal))
+            {
+                navigator.CommitMove(spawnCell, spawnNormal);
+            }
+            else
+            {
+                navigator.SnapToNearestBoundary(transform.position);
+            }
+
+            view.SnapTo(navigator.GetCellCenter(navigator.CurrentCell), navigator.GetRotation(navigator.SurfaceNormal));
+            return true;
         }
 
         public void OnMove(InputAction.CallbackContext context)

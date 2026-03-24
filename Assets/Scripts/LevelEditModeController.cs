@@ -5,6 +5,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
 using UnityEngine.Tilemaps;
 using UnityEngine.UI;
 using Tile = UnityEngine.Tilemaps.Tile;
@@ -20,7 +21,8 @@ namespace VerbGame
         [SerializeField] private CameraController cameraController;
         [SerializeField] private Grid grid;
         [SerializeField] private Tilemap groundTilemap;
-        [SerializeField] private LevelEditTilePalette tilePalette;
+        [FormerlySerializedAs("tilePalette")]
+        [SerializeField] private WallPanelCatalog tileCatalog;
         [SerializeField] private Transform playerTransform;
 
         [Header("UI")]
@@ -37,11 +39,11 @@ namespace VerbGame
 
         // ランタイム生成する UI ボタンと、ドラッグ中プレビューの描画プール。
         private readonly List<Button> tileButtons = new();
-        private readonly List<LevelEditTilePalette.Entry> selectableEntries = new();
+        private readonly List<WallPanelDefinition> selectableEntries = new();
         private readonly List<SpriteRenderer> previewRenderers = new();
 
         // 編集モードの現在状態。
-        private LevelEditTilePalette.Entry selectedEntry;
+        private WallPanelDefinition selectedEntry;
         private bool isUiVisible;
         private bool isDragging;
         private bool isDestroyDragging;
@@ -102,7 +104,7 @@ namespace VerbGame
         // パレットの内容からタイル選択ボタンを動的生成する。
         private void BuildTileButtons()
         {
-            if (tileButtonTemplate == null || tileListContent == null || tilePalette == null) return;
+            if (tileButtonTemplate == null || tileListContent == null || tileCatalog == null) return;
 
             // タイル一覧はテンプレートから横並びで動的生成する。
             ConfigureTileListLayout();
@@ -110,16 +112,16 @@ namespace VerbGame
             tileButtons.Clear();
             selectableEntries.Clear();
 
-            IReadOnlyList<LevelEditTilePalette.Entry> entries = tilePalette.Entries;
+            IReadOnlyList<WallPanelDefinition> entries = tileCatalog.PanelDefinitions;
             if (entries == null) return;
 
             for (int i = 0; i < entries.Count; i++)
             {
-                LevelEditTilePalette.Entry entry = entries[i];
-                if (entry == null || entry.id == 0 || entry.tile == null) continue;
+                WallPanelDefinition entry = entries[i];
+                if (entry == null || entry.Id == 0 || entry.Tile == null) continue;
 
                 Button button = Instantiate(tileButtonTemplate, tileListContent);
-                button.gameObject.name = $"TileButton_{entry.id}";
+                button.gameObject.name = $"TileButton_{entry.Id}";
                 button.gameObject.SetActive(true);
                 button.onClick.AddListener(() => SelectEntry(entry));
 
@@ -147,12 +149,12 @@ namespace VerbGame
         }
 
         // 最初に選ぶタイルを、パレット先頭の有効エントリから決める。
-        private void SelectFirstAvailableEntry(IReadOnlyList<LevelEditTilePalette.Entry> entries)
+        private void SelectFirstAvailableEntry(IReadOnlyList<WallPanelDefinition> entries)
         {
             for (int i = 0; i < entries.Count; i++)
             {
-                LevelEditTilePalette.Entry entry = entries[i];
-                if (entry == null || entry.id == 0 || entry.tile == null) continue;
+                WallPanelDefinition entry = entries[i];
+                if (entry == null || entry.Id == 0 || entry.Tile == null) continue;
                 SelectEntry(entry);
                 return;
             }
@@ -307,7 +309,7 @@ namespace VerbGame
             int maxX = Mathf.Max(startCell.x, endCell.x);
             int minY = Mathf.Min(startCell.y, endCell.y);
             int maxY = Mathf.Max(startCell.y, endCell.y);
-            bool isSpawnTile = selectedEntry != null && selectedEntry.id < 0;
+            bool isSpawnTile = selectedEntry != null && selectedEntry.IsSpawn;
             if (!destroyTiles && isSpawnTile)
             {
                 // Spawn だけは矩形塗りではなく単点配置に固定する。
@@ -315,7 +317,7 @@ namespace VerbGame
                 minY = maxY = endCell.y;
             }
 
-            TileBase tileToPaint = selectedEntry?.tile;
+            TileBase tileToPaint = selectedEntry?.Tile;
             if (!destroyTiles && tileToPaint == null)
             {
                 SetMessage("選択タイルがありません");
@@ -343,7 +345,7 @@ namespace VerbGame
         }
 
         // 現在選択中のタイルを差し替え、UI 表示も同期する。
-        private void SelectEntry(LevelEditTilePalette.Entry entry)
+        private void SelectEntry(WallPanelDefinition entry)
         {
             selectedEntry = entry;
             SetMessage(string.Empty);
@@ -382,7 +384,7 @@ namespace VerbGame
         // Ground 全体を CSV にしてクリップボードへ書き出す。
         private void ExportToClipboard()
         {
-            if (groundTilemap == null || tilePalette == null)
+            if (groundTilemap == null || tileCatalog == null)
             {
                 SetMessage("エクスポートに失敗しました");
                 return;
@@ -408,9 +410,9 @@ namespace VerbGame
 
                     TileBase tile = groundTilemap.GetTile(new Vector3Int(x, y, 0));
                     int tileId = 0;
-                    if (tilePalette.TryGetEntryByTile(tile, out LevelEditTilePalette.Entry entry))
+                    if (tileCatalog.TryGetPanelByTile(tile, out WallPanelDefinition entry))
                     {
-                        tileId = entry.id;
+                        tileId = entry.Id;
                     }
 
                     csv.Append(tileId);
@@ -424,7 +426,7 @@ namespace VerbGame
         // クリップボードの CSV を読んで Ground タイルを復元する。
         private void ImportFromClipboard()
         {
-            if (groundTilemap == null || tilePalette == null)
+            if (groundTilemap == null || tileCatalog == null)
             {
                 SetMessage("インポートに失敗しました");
                 return;
@@ -474,7 +476,7 @@ namespace VerbGame
                         int.TryParse(ids[xOffset], out tileId);
                     }
 
-                    TileBase tile = tilePalette.GetTile(tileId);
+                    TileBase tile = tileCatalog.GetTile(tileId);
                     if (tile == null)
                     {
                         continue;
@@ -498,7 +500,7 @@ namespace VerbGame
                 Button button = tileButtons[i];
                 if (button == null) continue;
 
-                bool isSelected = button.name == $"TileButton_{selectedEntry?.id}";
+                bool isSelected = button.name == $"TileButton_{selectedEntry?.Id}";
                 SetButtonColor(button, isSelected ? new Color(0.86f, 0.77f, 0.28f, 1f) : new Color(0.24f, 0.24f, 0.24f, 0.94f));
             }
         }
@@ -527,7 +529,7 @@ namespace VerbGame
         }
 
         // タイル選択ボタンにスプライト見た目を設定する。
-        private void ConfigureTileButtonVisual(Button button, LevelEditTilePalette.Entry entry)
+        private void ConfigureTileButtonVisual(Button button, WallPanelDefinition entry)
         {
             // テキストではなくスプライトそのものを見せる。
             RectTransform rectTransform = button.transform as RectTransform;
@@ -545,7 +547,7 @@ namespace VerbGame
             }
 
             Image iconImage = GetOrCreateIconImage(button);
-            Sprite sprite = GetTileSprite(entry.tile);
+            Sprite sprite = GetTileSprite(entry.Tile);
             iconImage.sprite = sprite;
             iconImage.preserveAspect = true;
             iconImage.color = sprite != null ? Color.white : new Color(1f, 1f, 1f, 0f);
@@ -561,7 +563,21 @@ namespace VerbGame
                 return;
             }
 
-            playerTransform.position = grid.GetCellCenterWorld(spawnCell);
+            PlayerController playerController = playerTransform.GetComponent<PlayerController>();
+            if (playerController == null)
+            {
+                playerController = playerTransform.GetComponentInParent<PlayerController>();
+            }
+
+            if (playerController != null)
+            {
+                playerController.RespawnToSpawn();
+            }
+            else
+            {
+                playerTransform.position = grid.GetCellCenterWorld(spawnCell);
+            }
+
             SetMessage($"Spawn へ戻しました: {spawnCell.x},{spawnCell.y}");
         }
 
@@ -605,7 +621,7 @@ namespace VerbGame
             int maxX = Mathf.Max(startCell.x, endCell.x);
             int minY = Mathf.Min(startCell.y, endCell.y);
             int maxY = Mathf.Max(startCell.y, endCell.y);
-            if (!isDestroyDragging && selectedEntry != null && selectedEntry.id < 0)
+            if (!isDestroyDragging && selectedEntry != null && selectedEntry.IsSpawn)
             {
                 // Spawn プレビューだけは最後に指している 1 マスだけ見せる。
                 minX = maxX = endCell.x;
@@ -617,7 +633,7 @@ namespace VerbGame
             EnsurePreviewPool(requiredCount);
 
             Sprite previewSprite = !isDestroyDragging
-                ? GetTileSprite(selectedEntry?.tile) ?? GetFallbackPreviewSprite()
+                ? GetTileSprite(selectedEntry?.Tile) ?? GetFallbackPreviewSprite()
                 : GetFallbackPreviewSprite();
 
             Color previewColor = isDestroyDragging
@@ -693,7 +709,7 @@ namespace VerbGame
         // 既存の Spawn タイルを全消去して 1 個だけに保つ。
         private void ClearExistingSpawnTiles()
         {
-            if (groundTilemap == null || tilePalette == null) return;
+            if (groundTilemap == null || tileCatalog == null) return;
 
             // Spawn は 1 個だけに保つ。
             BoundsInt bounds = groundTilemap.cellBounds;
@@ -703,7 +719,7 @@ namespace VerbGame
                 {
                     Vector3Int cell = new(x, y, 0);
                     TileBase tile = groundTilemap.GetTile(cell);
-                    if (!tilePalette.TryGetEntryByTile(tile, out LevelEditTilePalette.Entry entry) || entry.id >= 0) continue;
+                    if (!tileCatalog.TryGetPanelByTile(tile, out WallPanelDefinition entry) || !entry.IsSpawn) continue;
                     groundTilemap.SetTile(cell, null);
                 }
             }
@@ -712,7 +728,7 @@ namespace VerbGame
         // Spawn タイルだけ、編集モード時に見せて通常時は隠す。
         private void RefreshSpawnTileVisibility()
         {
-            if (groundTilemap == null || tilePalette == null) return;
+            if (groundTilemap == null || tileCatalog == null) return;
 
             // Spawn はデータとしては常に存在するが、通常プレイ中は視覚ノイズになるので隠す。
             BoundsInt bounds = groundTilemap.cellBounds;
@@ -724,7 +740,7 @@ namespace VerbGame
                 {
                     Vector3Int cell = new(x, y, 0);
                     TileBase tile = groundTilemap.GetTile(cell);
-                    if (!tilePalette.TryGetEntryByTile(tile, out LevelEditTilePalette.Entry entry) || entry.id >= 0) continue;
+                    if (!tileCatalog.TryGetPanelByTile(tile, out WallPanelDefinition entry) || !entry.IsSpawn) continue;
 
                     groundTilemap.SetTileFlags(cell, TileFlags.None);
                     groundTilemap.SetColor(cell, tileColor);
@@ -764,7 +780,7 @@ namespace VerbGame
         private bool TryFindSpawnCell(out Vector3Int spawnCell)
         {
             spawnCell = default;
-            if (groundTilemap == null || tilePalette == null) return false;
+            if (groundTilemap == null || tileCatalog == null) return false;
 
             // Ground 上に置かれた Spawn タイルそのもののセルを返す。
             BoundsInt bounds = groundTilemap.cellBounds;
@@ -775,7 +791,7 @@ namespace VerbGame
                 {
                     Vector3Int tileCell = new(x, y, 0);
                     TileBase tile = groundTilemap.GetTile(tileCell);
-                    if (!tilePalette.TryGetEntryByTile(tile, out LevelEditTilePalette.Entry entry) || entry.id >= 0) continue;
+                    if (!tileCatalog.TryGetPanelByTile(tile, out WallPanelDefinition entry) || !entry.IsSpawn) continue;
                     spawnCell = tileCell;
                     return true;
                 }
@@ -785,12 +801,12 @@ namespace VerbGame
         }
 
         // タイル選択欄に出す表示名を ID 付きで組み立てる。
-        private static string BuildEntryLabel(LevelEditTilePalette.Entry entry)
+        private static string BuildEntryLabel(WallPanelDefinition entry)
         {
             if (entry == null) return "なし";
 
-            string label = string.IsNullOrWhiteSpace(entry.label) ? $"ID {entry.id}" : entry.label.Trim();
-            return $"{entry.id}: {label}";
+            string label = string.IsNullOrWhiteSpace(entry.Label) ? $"ID {entry.Id}" : entry.Label.Trim();
+            return $"{entry.Id}: {label}";
         }
 
         // CSV 1 行を単純なカンマ区切りで分解する。

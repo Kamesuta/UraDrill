@@ -76,7 +76,7 @@ namespace VerbGame
                 for (int x = bounds.xMin; x < bounds.xMax; x++)
                 {
                     Vector3Int candidateCell = new(x, y, 0);
-                    if (GetPanelType(candidateCell) != WallPanelType.Spawn) continue;
+                    if (!IsSpawnCell(candidateCell)) continue;
 
                     for (int i = 0; i < searchOrder.Length; i++)
                     {
@@ -153,7 +153,8 @@ namespace VerbGame
             // 硬い壁にぶつかったら、通過ではなく反射ルートへ切り替える。
             while (HasGround(cell))
             {
-                if (GetPanelType(cell) == WallPanelType.HardWall)
+                WallPanelDefinition panel = GetPanel(cell);
+                if (panel != null && panel.BouncesDrill)
                 {
                     // 1セル目から硬い壁なら掘れないので不発にする。
                     if (drillPath.Count == 0) return false;
@@ -251,22 +252,16 @@ namespace VerbGame
             return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
         }
 
-        public WallPanelType GetPanelType(Vector3Int cell)
-        {
-            TileBase tile = groundTilemap != null ? groundTilemap.GetTile(cell) : null;
-            return wallPanelCatalog != null ? wallPanelCatalog.GetPanelType(tile) : WallPanelType.Default;
-        }
-
         public bool ShouldSlipOnCurrentSurface()
         {
             // 上向き法線は床なので滑らない。
             if (SurfaceNormal == Vector2Int.up) return false;
-            return GetPanelType(CurrentCell - ToCell(SurfaceNormal)) == WallPanelType.Ice;
+            return GetPanel(CurrentCell - ToCell(SurfaceNormal))?.CausesSlip ?? false;
         }
 
         public bool IsTouchingCheckpoint()
         {
-            return GetPanelType(CurrentCell - ToCell(SurfaceNormal)) == WallPanelType.Checkpoint;
+            return GetPanel(CurrentCell - ToCell(SurfaceNormal))?.IsGoal ?? false;
         }
 
         private bool CanAttachToNonIceSurface(Vector3Int cell, Vector2Int normal)
@@ -275,7 +270,7 @@ namespace VerbGame
             // 氷以外ならそこへ張り直せる。
             Vector3Int supportCell = cell - ToCell(normal);
             if (!HasGround(supportCell)) return false;
-            return GetPanelType(supportCell) != WallPanelType.Ice;
+            return !(GetPanel(supportCell)?.CausesSlip ?? false);
         }
 
         // 凸角ターンの中間点。
@@ -297,7 +292,12 @@ namespace VerbGame
 
             TileBase tile = groundTilemap.GetTile(cell);
             if (tile == null) return false;
-            return GetPanelType(cell) != WallPanelType.Spawn;
+            return !IsSpawnCell(cell);
+        }
+
+        private bool IsSpawnCell(Vector3Int cell)
+        {
+            return GetPanel(cell)?.IsSpawn ?? false;
         }
 
         private void BuildHardWallBouncePath(List<Vector3Int> drillPath)

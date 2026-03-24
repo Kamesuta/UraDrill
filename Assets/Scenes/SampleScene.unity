@@ -1129,10 +1129,6 @@ PrefabInstance:
       propertyPath: groundTilemap
       value: 
       objectReference: {fileID: 1057229881}
-    - target: {fileID: 6202122685485860320, guid: d482ad6c0e261764d84bdd0f8f95f66f, type: 3}
-      propertyPath: respawnButton
-      value: 
-      objectReference: {fileID: 0}
     - target: {fileID: 6643176516715712047, guid: d482ad6c0e261764d84bdd0f8f95f66f, type: 3}
       propertyPath: m_AnchorMax.y
       value: 0

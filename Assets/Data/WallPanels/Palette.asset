@@ -10,12 +10,12 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ceb90f59fff01084498218c17d28b33f, type: 3}
-  m_Name: WallPanelCatalog
+  m_Name: Palette
   m_EditorClassIdentifier: Assembly-CSharp::VerbGame.WallPanelCatalog
-  defaultPanel: {fileID: 0}
+  defaultPanel: {fileID: 11400000, guid: f6b94b03a39b95843a9e438f550f024c, type: 2}
   panelDefinitions:
   - {fileID: 11400000, guid: a546c6c4fd6951348a9de7ccfceeb409, type: 2}
+  - {fileID: 11400000, guid: 243d35fae50f463aa221b177a86668e7, type: 2}
   - {fileID: 11400000, guid: f6b94b03a39b95843a9e438f550f024c, type: 2}
   - {fileID: 11400000, guid: 75a0f31d5d9a14240a71f97864ae2c48, type: 2}
   - {fileID: 11400000, guid: 8fd8996012a6c504bab0994eb3350983, type: 2}
-  - {fileID: 11400000, guid: 243d35fae50f463aa221b177a86668e7, type: 2}
