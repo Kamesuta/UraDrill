@@ -153,43 +153,28 @@ namespace VerbGame
         private bool TryStartDrill()
         {
             // まず論理クラスに「掘れるか」と「どこを通るか」を聞く。
-            if (!navigator.TryBuildDrillPath(out var drillDirection, out List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out bool bouncedByHardWall, out int bounceTurnIndex)) return false;
+            if (!navigator.TryBuildDrillPath(out var drillDirection, out List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out bool bouncedByHardWall, out List<int> drillTurnIndices, out List<Vector2Int> drillTurnDirections)) return false;
 
             isBusy = true;
             view.SetFacing(moveInput >= 0f ? 1 : -1);
 
             List<Vector3> drillPositions = drillPath.ConvertAll(navigator.GetCellCenter);
+            List<Quaternion> drillTurnRotations = drillTurnDirections.ConvertAll(navigator.GetRotation);
 
-            // 見た目は「先に回転」「次にアニメーションON」「最後に直進」。
-            if (bouncedByHardWall)
-            {
-                PlaySfx(drillClip);
-                view.RotateBounceThenReturn(
-                    navigator.GetRotation(drillDirection),
-                    navigator.GetRotation(endNormal),
-                    drillRotateDuration,
-                    drillPositions,
-                    bounceTurnIndex,
-                    drillStepDuration,
-                    () => PlaySfx(hardWallClip),
-                    () =>
-                    {
-                        navigator.FinishDrill(endCell, endNormal);
-                        FinishMovementStep();
-                    });
-                return true;
-            }
-
+            // 見た目は「先に回転」「次にアニメーションON」「最後に経路どおり進む」。
             PlaySfx(drillClip);
-            view.RotateThenDrill(
+            view.RotateThenDrillWithTurns(
                 navigator.GetRotation(drillDirection),
                 drillRotateDuration,
                 drillPositions,
+                drillTurnIndices,
+                drillTurnRotations,
                 drillStepDuration,
+                bouncedByHardWall ? () => PlaySfx(hardWallClip) : null,
                 () =>
                 {
                     // 通常の壁なら出口へ抜け、
-                    // 硬い壁なら開始地点へ跳ね返された結果を確定する。
+                    // 反射した場合は最終的な経路結果をそのまま確定する。
                     navigator.FinishDrill(endCell, endNormal);
                     FinishMovementStep();
                 });

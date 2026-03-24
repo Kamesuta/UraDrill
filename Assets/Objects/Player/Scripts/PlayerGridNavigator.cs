@@ -128,7 +128,7 @@ namespace VerbGame
             return false;
         }
 
-        public bool TryBuildDrillPath(out Vector2Int drillDirection, out List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out bool bouncedByHardWall, out int bounceTurnIndex)
+        public bool TryBuildDrillPath(out Vector2Int drillDirection, out List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out bool bouncedByHardWall, out List<int> drillTurnIndices, out List<Vector2Int> drillTurnDirections)
         {
             // ドリルは常に面法線の逆、つまり地面の中へ掘る。
             drillDirection = -SurfaceNormal;
@@ -136,9 +136,11 @@ namespace VerbGame
             endCell = CurrentCell;
             endNormal = SurfaceNormal;
             bouncedByHardWall = false;
-            bounceTurnIndex = -1;
+            drillTurnIndices = new List<int>();
+            drillTurnDirections = new List<Vector2Int>();
 
-            Vector3Int cell = CurrentCell + ToCell(drillDirection);
+            Vector2Int currentDirection = drillDirection;
+            Vector3Int cell = CurrentCell + ToCell(currentDirection);
             if (!HasGround(cell)) return false;
 
             // 地面セルが切れるまで一直線に進む。
@@ -148,7 +150,7 @@ namespace VerbGame
                 WallPanelDefinition panel = GetPanel(cell);
                 if (panel != null && panel.BouncesDrill)
                 {
-                    if (!TryResolveBounce(panel, drillDirection, out Vector2Int bounceDirection, out bool bounceAtSurface))
+                    if (!TryResolveBounce(panel, currentDirection, out Vector2Int bounceDirection, out bool bounceAtSurface))
                     {
                         return false;
                     }
@@ -159,24 +161,26 @@ namespace VerbGame
                     bouncedByHardWall = true;
                     if (bounceAtSurface)
                     {
-                        ApplySurfaceBounce(drillPath, out endCell, out endNormal, out bounceTurnIndex);
+                        ApplySurfaceBounce(drillPath, out endCell, out endNormal);
+                        BuildDrillTurns(drillDirection, drillPath, drillTurnIndices, drillTurnDirections);
                         return true;
                     }
 
                     drillPath.Add(cell);
-                    bounceTurnIndex = drillPath.Count - 1;
-                    BuildDirectedBouncePath(cell, bounceDirection, drillPath, out endCell, out endNormal);
-                    return true;
+                    currentDirection = bounceDirection;
+                    cell += ToCell(currentDirection);
+                    continue;
                 }
 
                 drillPath.Add(cell);
-                cell += ToCell(drillDirection);
+                cell += ToCell(currentDirection);
             }
 
             // 通常の壁なら、最後は地中を抜けた先の空セルへ出る。
             drillPath.Add(cell);
             endCell = cell;
-            endNormal = drillDirection;
+            endNormal = currentDirection;
+            BuildDrillTurns(drillDirection, drillPath, drillTurnIndices, drillTurnDirections);
 
             return true;
         }
@@ -320,30 +324,12 @@ namespace VerbGame
             drillPath.Add(CurrentCell);
         }
 
-        private void ApplySurfaceBounce(List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out int bounceTurnIndex)
+        private void ApplySurfaceBounce(List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal)
         {
             // 壁セルへは入らず、直前セルを折り返し位置としてそのまま戻す。
-            bounceTurnIndex = drillPath.Count - 1;
             BuildHardWallBouncePath(drillPath);
             endCell = CurrentCell;
             endNormal = SurfaceNormal;
-        }
-
-        private void BuildDirectedBouncePath(Vector3Int bounceCell, Vector2Int bounceDirection, List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal)
-        {
-            // 斜めブロックで向きを変えた後は、
-            // 新しい方向へ壁が切れるまで真っ直ぐ掘り進む。
-            Vector3Int cell = bounceCell + ToCell(bounceDirection);
-            while (HasGround(cell))
-            {
-                drillPath.Add(cell);
-                cell += ToCell(bounceDirection);
-            }
-
-            // 最後は通常ドリルと同じく、壁の外の空セルへ出る。
-            drillPath.Add(cell);
-            endCell = cell;
-            endNormal = bounceDirection;
         }
 
         private bool TryGetDirectionalBounce(WallPanelDirection direction, Vector2Int incomingDirection, out Vector2Int bounceDirection, out bool bounceAtSurface)
@@ -439,6 +425,24 @@ namespace VerbGame
             }
 
             return false;
+        }
+
+        private void BuildDrillTurns(Vector2Int initialDirection, List<Vector3Int> drillPath, List<int> drillTurnIndices, List<Vector2Int> drillTurnDirections)
+        {
+            if (drillPath == null || drillPath.Count < 2) return;
+
+            Vector2Int currentDirection = initialDirection;
+            for (int i = 0; i < drillPath.Count - 1; i++)
+            {
+                Vector3Int delta = drillPath[i + 1] - drillPath[i];
+                Vector2Int nextDirection = new(delta.x, delta.y);
+                if (nextDirection == currentDirection) continue;
+
+                // そのセルへ到達した直後に向きが変わる位置を記録する。
+                drillTurnIndices.Add(i);
+                drillTurnDirections.Add(nextDirection);
+                currentDirection = nextDirection;
+            }
         }
 
         private Vector2Int RotateClockwise(Vector2Int value) => new(value.y, -value.x);

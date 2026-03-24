@@ -106,6 +106,17 @@ namespace VerbGame
             });
         }
 
+        public void RotateThenDrillWithTurns(Quaternion drillRotation, float rotateDuration, List<Vector3> drillPositions, List<int> turnIndices, List<Quaternion> turnRotations, float stepDuration, Action onTurn, Action onComplete)
+        {
+            // ドリル経路の途中で向きが変わる場合も、
+            // 曲がり角のたびに回転だけを即時反映して追従する。
+            AnimateRotation(drillRotation, rotateDuration, () =>
+            {
+                SetDrilling(true);
+                PlayDrillStepWithTurns(drillPositions, 0, turnIndices, turnRotations, 0, stepDuration, onTurn, onComplete);
+            });
+        }
+
         public void RotateBounceThenReturn(Quaternion drillRotation, Quaternion returnRotation, float rotateDuration, List<Vector3> drillPositions, int bounceTurnIndex, float stepDuration, Action onBounce, Action onComplete)
         {
             // 硬い壁に当たった時は、
@@ -152,6 +163,42 @@ namespace VerbGame
                 onComplete?.Invoke();
             });
         }
+
+        private void PlayDrillStepWithTurns(List<Vector3> drillPositions, int index, List<int> turnIndices, List<Quaternion> turnRotations, int nextTurnCursor, float stepDuration, Action onTurn, Action onComplete)
+        {
+            if (drillPositions == null || index < 0 || index >= drillPositions.Count)
+            {
+                SetDrilling(false);
+                onComplete?.Invoke();
+                return;
+            }
+
+            AnimatePosition(drillPositions[index], stepDuration, () =>
+            {
+                int updatedTurnCursor = nextTurnCursor;
+                if (turnIndices != null &&
+                    turnRotations != null &&
+                    updatedTurnCursor < turnIndices.Count &&
+                    updatedTurnCursor < turnRotations.Count &&
+                    index == turnIndices[updatedTurnCursor])
+                {
+                    // 曲がり角へ到達した瞬間に、次の進行方向へ向きを切り替える。
+                    onTurn?.Invoke();
+                    SnapRotation(turnRotations[updatedTurnCursor]);
+                    updatedTurnCursor++;
+                }
+
+                if (index + 1 < drillPositions.Count)
+                {
+                    PlayDrillStepWithTurns(drillPositions, index + 1, turnIndices, turnRotations, updatedTurnCursor, stepDuration, onTurn, onComplete);
+                    return;
+                }
+
+                SetDrilling(false);
+                onComplete?.Invoke();
+            });
+        }
+
 
         private void PlayFallStep(List<Vector3> fallPositions, int index, Quaternion landingRotation, float stepDuration, Action onComplete)
         {
