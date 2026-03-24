@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -8,12 +5,11 @@ using UnityEngine.InputSystem;
 using UnityEngine.Serialization;
 using UnityEngine.Tilemaps;
 using UnityEngine.UI;
-using Tile = UnityEngine.Tilemaps.Tile;
 
 namespace VerbGame
 {
     // レベル編集モードの司令塔。
-    // UI の開閉、タイル選択、ドラッグ塗り、CSV 入出力、スポーン表示制御をまとめて担当する。
+    // UI の開閉、入力の振り分け、タイル適用、Spawn 表示制御を担当する。
     public sealed class LevelEditModeController : MonoBehaviour
     {
         [Header("シーン参照")]
@@ -37,36 +33,44 @@ namespace VerbGame
         [SerializeField] private float previewAlpha = 0.35f;
         [SerializeField] private int previewSortingOrder = 10;
 
-        // ランタイム生成する UI ボタンと、ドラッグ中プレビューの描画プール。
-        private readonly List<Button> tileButtons = new();
-        private readonly List<WallPanelDefinition> selectableEntries = new();
-        private readonly List<SpriteRenderer> previewRenderers = new();
-
-        // 編集モードの現在状態。
-        private WallPanelDefinition selectedEntry;
+        // 編集モード全体の表示状態。
         private bool isUiVisible;
+        // 左右クリックのドラッグ編集中かどうか。
         private bool isDragging;
+        // 現在のドラッグが破壊モードかどうか。
         private bool isDestroyDragging;
+        // 中クリックが押されている間だけ true。
         private bool isMiddleButtonHeld;
+        // 中クリックが「クリック」ではなく「パン」に入ったかどうか。
         private bool isMiddleDragPanning;
+        // ドラッグ編集の開始セル。
         private Vector3Int dragStartCell;
+        // ドラッグ編集の現在セル。
         private Vector3Int dragCurrentCell;
+        // 中クリック開始位置。クリック判定とパン量計算の基準に使う。
         private Vector2 middlePressScreenPosition;
+        // パン開始時のカメラ位置。
         private Vector3 cameraPanStartPosition;
-        private Transform previewRoot;
-        private Sprite fallbackPreviewSprite;
+        // タイル一覧 UI と選択状態の担当。
+        private LevelEditModeTilePalette tilePalette;
+        // ドラッグ矩形プレビューの描画担当。
+        private LevelEditModePreview preview;
 
-        // 起動時に UI と初期状態を組み立てる。
+        // 起動時に補助クラスと UI を組み立てる。
         private void Awake()
         {
-            // 起動時に UI を組み立てておくが、表示自体は閉じた状態から始める。
+            // ワールドカメラから自動で CameraController を拾えるようにしておく。
             if (cameraController == null && worldCamera != null)
             {
                 cameraController = worldCamera.GetComponent<CameraController>();
             }
 
+            // ここでは司令塔から詳細実装を分離して組み立てだけ行う。
+            tilePalette = new LevelEditModeTilePalette(tileListContent, tileButtonTemplate, tileCatalog, tileIconSize, _ => SetMessage(string.Empty));
+            preview = new LevelEditModePreview(transform, grid, previewAlpha, previewSortingOrder);
+
             BindButtons();
-            BuildTileButtons();
+            tilePalette.Build();
             SetUiVisible(false);
             SetMessage(string.Empty);
         }
@@ -83,7 +87,7 @@ namespace VerbGame
             // UI を閉じている間は入力を無視し、プレビューだけ確実に消す。
             if (!isUiVisible || Mouse.current == null || worldCamera == null || grid == null || groundTilemap == null)
             {
-                HidePreview();
+                preview?.Hide();
                 return;
             }
 
@@ -101,70 +105,12 @@ namespace VerbGame
             if (importButton != null) importButton.onClick.AddListener(ImportFromClipboard);
         }
 
-        // パレットの内容からタイル選択ボタンを動的生成する。
-        private void BuildTileButtons()
-        {
-            if (tileButtonTemplate == null || tileListContent == null || tileCatalog == null) return;
-
-            // タイル一覧はテンプレートから横並びで動的生成する。
-            ConfigureTileListLayout();
-            tileButtonTemplate.gameObject.SetActive(false);
-            tileButtons.Clear();
-            selectableEntries.Clear();
-
-            IReadOnlyList<WallPanelDefinition> entries = tileCatalog.PanelDefinitions;
-            if (entries == null) return;
-
-            for (int i = 0; i < entries.Count; i++)
-            {
-                WallPanelDefinition entry = entries[i];
-                if (entry == null || entry.Id == 0 || entry.Tile == null) continue;
-
-                Button button = Instantiate(tileButtonTemplate, tileListContent);
-                button.gameObject.name = $"TileButton_{entry.Id}";
-                button.gameObject.SetActive(true);
-                button.onClick.AddListener(() => SelectEntry(entry));
-
-                ConfigureTileButtonVisual(button, entry);
-
-                TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
-                if (label != null)
-                {
-                    label.gameObject.SetActive(false);
-                }
-
-                selectableEntries.Add(entry);
-                tileButtons.Add(button);
-            }
-
-            if (entries.Count > 0)
-            {
-                SelectFirstAvailableEntry(entries);
-            }
-            else
-            {
-                // パレットが空でも操作説明だけは表示する。
-                SetMessage(string.Empty);
-            }
-        }
-
-        // 最初に選ぶタイルを、パレット先頭の有効エントリから決める。
-        private void SelectFirstAvailableEntry(IReadOnlyList<WallPanelDefinition> entries)
-        {
-            for (int i = 0; i < entries.Count; i++)
-            {
-                WallPanelDefinition entry = entries[i];
-                if (entry == null || entry.Id == 0 || entry.Tile == null) continue;
-                SelectEntry(entry);
-                return;
-            }
-        }
-
         // 中クリックのドラッグでパンし、チョン押しならプレイヤー追従へ戻す。
         private void HandleCameraInput()
         {
             if (Mouse.current == null || worldCamera == null) return;
 
+            // 押し始めの位置とカメラ位置を記録して、クリックかドラッグかを後で判定する。
             if (Mouse.current.middleButton.wasPressedThisFrame)
             {
                 isMiddleButtonHeld = true;
@@ -181,12 +127,14 @@ namespace VerbGame
             Vector2 currentScreenPosition = Mouse.current.position.ReadValue();
             if (!isMiddleDragPanning && (currentScreenPosition - middlePressScreenPosition).sqrMagnitude >= 25f)
             {
+                // 少しでも動いたらクリックではなくパンとして扱う。
                 isMiddleDragPanning = true;
                 cameraController?.SetFollowEnabled(false);
             }
 
             if (isMiddleDragPanning)
             {
+                // 画面上の移動量をワールド座標に変換してカメラへ反映する。
                 Vector3 targetCameraPosition = cameraPanStartPosition + GetCameraPanDelta(middlePressScreenPosition, currentScreenPosition);
                 targetCameraPosition.z = cameraPanStartPosition.z;
 
@@ -211,6 +159,7 @@ namespace VerbGame
 
             if (!wasPanning)
             {
+                // 動かしていなければ「追従へ戻すクリック」とみなす。
                 ReturnCameraFollowToPlayer();
             }
         }
@@ -218,12 +167,12 @@ namespace VerbGame
         // ホイール上下で選択タイルを前後に切り替える。
         private void HandleScrollSelection()
         {
-            if (Mouse.current == null || selectableEntries.Count == 0) return;
+            if (Mouse.current == null || tilePalette == null || tilePalette.SelectableEntries.Count == 0) return;
 
             float scrollY = Mouse.current.scroll.ReadValue().y;
             if (Mathf.Abs(scrollY) < 0.01f) return;
 
-            SelectEntryByOffset(scrollY > 0f ? -1 : 1);
+            tilePalette.SelectEntryByOffset(scrollY > 0f ? -1 : 1);
         }
 
         // 左クリックで配置、右クリックで破壊の矩形編集を行う。
@@ -238,6 +187,7 @@ namespace VerbGame
             bool destroyPressed = Mouse.current.rightButton.wasPressedThisFrame;
             if (placePressed || destroyPressed)
             {
+                // UI 上のクリックは編集入力として扱わない。
                 if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
                 {
                     return;
@@ -251,7 +201,8 @@ namespace VerbGame
                 isDragging = true;
                 isDestroyDragging = destroyPressed;
                 dragCurrentCell = dragStartCell;
-                UpdatePreview(dragStartCell, dragCurrentCell);
+                // 押した瞬間から 1 マスぶんのプレビューを出しておく。
+                preview?.ShowRect(dragStartCell, dragCurrentCell, isDestroyDragging, tilePalette?.SelectedEntry);
             }
 
             if (!isDragging)
@@ -263,7 +214,7 @@ namespace VerbGame
             {
                 // ドラッグ中は現在位置に合わせてプレビュー矩形を更新し続ける。
                 dragCurrentCell = hoveredCell;
-                UpdatePreview(dragStartCell, dragCurrentCell);
+                preview?.ShowRect(dragStartCell, dragCurrentCell, isDestroyDragging, tilePalette?.SelectedEntry);
             }
 
             bool dragReleased = isDestroyDragging
@@ -281,7 +232,7 @@ namespace VerbGame
             }
 
             ApplyRect(dragStartCell, dragEndCell, isDestroyDragging);
-            HidePreview();
+            preview?.Hide();
         }
 
         // マウスカーソル位置を Ground のセル座標へ変換する。
@@ -309,6 +260,8 @@ namespace VerbGame
             int maxX = Mathf.Max(startCell.x, endCell.x);
             int minY = Mathf.Min(startCell.y, endCell.y);
             int maxY = Mathf.Max(startCell.y, endCell.y);
+
+            WallPanelDefinition selectedEntry = tilePalette?.SelectedEntry;
             bool isSpawnTile = selectedEntry != null && selectedEntry.IsSpawn;
             if (!destroyTiles && isSpawnTile)
             {
@@ -344,30 +297,6 @@ namespace VerbGame
             SetMessage($"{(destroyTiles ? "破壊" : "配置")} [{minX},{minY}] - [{maxX},{maxY}]");
         }
 
-        // 現在選択中のタイルを差し替え、UI 表示も同期する。
-        private void SelectEntry(WallPanelDefinition entry)
-        {
-            selectedEntry = entry;
-            SetMessage(string.Empty);
-            UpdateTileButtonHighlights();
-        }
-
-        // ホイール操作で選択タイルを前後に送る。
-        private void SelectEntryByOffset(int offset)
-        {
-            if (selectableEntries.Count == 0) return;
-
-            int currentIndex = selectedEntry != null ? selectableEntries.IndexOf(selectedEntry) : -1;
-            if (currentIndex < 0)
-            {
-                SelectEntry(selectableEntries[0]);
-                return;
-            }
-
-            int nextIndex = (currentIndex + offset + selectableEntries.Count) % selectableEntries.Count;
-            SelectEntry(selectableEntries[nextIndex]);
-        }
-
         // 編集 UI の表示切替と、Spawn タイルの可視状態を同期する。
         private void SetUiVisible(bool visible)
         {
@@ -384,174 +313,28 @@ namespace VerbGame
         // Ground 全体を CSV にしてクリップボードへ書き出す。
         private void ExportToClipboard()
         {
-            if (groundTilemap == null || tileCatalog == null)
+            if (!LevelEditModeCsvUtility.TryBuildCsv(groundTilemap, tileCatalog, out string csv, out BoundsInt bounds, out string errorMessage))
             {
-                SetMessage("エクスポートに失敗しました");
+                SetMessage(errorMessage);
                 return;
             }
 
-            BoundsInt bounds = groundTilemap.cellBounds;
-            if (bounds.size.x <= 0 || bounds.size.y <= 0)
-            {
-                SetMessage("Ground にタイルがありません");
-                return;
-            }
-
-            // 1 行目は bounds、2 行目以降はタイル ID の表にする。
-            StringBuilder csv = new();
-            csv.Append(bounds.xMin).Append(',').Append(bounds.yMin).Append(',').Append(bounds.size.x).Append(',').Append(bounds.size.y);
-
-            for (int y = bounds.yMax - 1; y >= bounds.yMin; y--)
-            {
-                csv.AppendLine();
-                for (int x = bounds.xMin; x < bounds.xMax; x++)
-                {
-                    if (x > bounds.xMin) csv.Append(',');
-
-                    TileBase tile = groundTilemap.GetTile(new Vector3Int(x, y, 0));
-                    int tileId = 0;
-                    if (tileCatalog.TryGetPanelByTile(tile, out WallPanelDefinition entry))
-                    {
-                        tileId = entry.Id;
-                    }
-
-                    csv.Append(tileId);
-                }
-            }
-
-            GUIUtility.systemCopyBuffer = csv.ToString();
+            GUIUtility.systemCopyBuffer = csv;
             SetMessage($"CSVをコピーしました: {bounds.size.x}x{bounds.size.y}");
         }
 
         // クリップボードの CSV を読んで Ground タイルを復元する。
         private void ImportFromClipboard()
         {
-            if (groundTilemap == null || tileCatalog == null)
-            {
-                SetMessage("インポートに失敗しました");
-                return;
-            }
-
             string csv = GUIUtility.systemCopyBuffer;
-            if (string.IsNullOrWhiteSpace(csv))
+            if (!LevelEditModeCsvUtility.TryImportCsv(groundTilemap, tileCatalog, csv, out int importedCount, out string errorMessage))
             {
-                SetMessage("クリップボードが空です");
+                SetMessage(errorMessage);
                 return;
             }
 
-            string[] lines = csv.Replace("\r", string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            if (lines.Length < 2)
-            {
-                SetMessage("CSV の形式が不正です");
-                return;
-            }
-
-            string[] header = SplitCsvLine(lines[0]);
-            if (header.Length < 4 ||
-                !int.TryParse(header[0], out int xMin) ||
-                !int.TryParse(header[1], out int yMin) ||
-                !int.TryParse(header[2], out int width) ||
-                !int.TryParse(header[3], out int height) ||
-                width <= 0 ||
-                height <= 0)
-            {
-                SetMessage("CSV ヘッダーが不正です");
-                return;
-            }
-
-            // いったん全消ししてから CSV 内容を敷き直す。
-            groundTilemap.ClearAllTiles();
-
-            int importedCount = 0;
-            int rowCount = Mathf.Min(height, lines.Length - 1);
-            for (int row = 0; row < rowCount; row++)
-            {
-                int y = yMin + (height - 1 - row);
-                string[] ids = SplitCsvLine(lines[row + 1]);
-                for (int xOffset = 0; xOffset < width; xOffset++)
-                {
-                    int tileId = 0;
-                    if (xOffset < ids.Length && !string.IsNullOrWhiteSpace(ids[xOffset]))
-                    {
-                        int.TryParse(ids[xOffset], out tileId);
-                    }
-
-                    TileBase tile = tileCatalog.GetTile(tileId);
-                    if (tile == null)
-                    {
-                        continue;
-                    }
-
-                    groundTilemap.SetTile(new Vector3Int(xMin + xOffset, y, 0), tile);
-                    importedCount++;
-                }
-            }
-
-            groundTilemap.CompressBounds();
             RefreshSpawnTileVisibility();
             SetMessage($"CSVを読み込みました: {importedCount} タイル");
-        }
-
-        // 選択中タイルのボタンだけ色を変えて分かるようにする。
-        private void UpdateTileButtonHighlights()
-        {
-            for (int i = 0; i < tileButtons.Count; i++)
-            {
-                Button button = tileButtons[i];
-                if (button == null) continue;
-
-                bool isSelected = button.name == $"TileButton_{selectedEntry?.Id}";
-                SetButtonColor(button, isSelected ? new Color(0.86f, 0.77f, 0.28f, 1f) : new Color(0.24f, 0.24f, 0.24f, 0.94f));
-            }
-        }
-
-        // タイル一覧コンテナを横並びレイアウトに整える。
-        private void ConfigureTileListLayout()
-        {
-            // タイル一覧は横スクロール前提の横並び。
-            if (!tileListContent.TryGetComponent<HorizontalLayoutGroup>(out var horizontalLayout))
-            {
-                horizontalLayout = tileListContent.gameObject.AddComponent<HorizontalLayoutGroup>();
-            }
-
-            horizontalLayout.spacing = 8f;
-            horizontalLayout.padding = new RectOffset(8, 8, 8, 8);
-            horizontalLayout.childAlignment = TextAnchor.MiddleLeft;
-            horizontalLayout.childControlWidth = false;
-            horizontalLayout.childControlHeight = false;
-            horizontalLayout.childForceExpandWidth = false;
-            horizontalLayout.childForceExpandHeight = false;
-
-            if (tileListContent.TryGetComponent<VerticalLayoutGroup>(out var verticalLayout))
-            {
-                verticalLayout.enabled = false;
-            }
-        }
-
-        // タイル選択ボタンにスプライト見た目を設定する。
-        private void ConfigureTileButtonVisual(Button button, WallPanelDefinition entry)
-        {
-            // テキストではなくスプライトそのものを見せる。
-            RectTransform rectTransform = button.transform as RectTransform;
-            if (rectTransform != null)
-            {
-                rectTransform.sizeDelta = new Vector2(tileIconSize, tileIconSize);
-            }
-
-            if (button.TryGetComponent<LayoutElement>(out var layoutElement))
-            {
-                layoutElement.preferredWidth = tileIconSize;
-                layoutElement.preferredHeight = tileIconSize;
-                layoutElement.flexibleWidth = 0f;
-                layoutElement.flexibleHeight = 0f;
-            }
-
-            Image iconImage = GetOrCreateIconImage(button);
-            Sprite sprite = GetTileSprite(entry.Tile);
-            iconImage.sprite = sprite;
-            iconImage.preserveAspect = true;
-            iconImage.color = sprite != null ? Color.white : new Color(1f, 1f, 1f, 0f);
-            iconImage.raycastTarget = false;
         }
 
         // いま置かれている Spawn タイル位置へプレイヤーを戻す。
@@ -579,131 +362,6 @@ namespace VerbGame
             }
 
             SetMessage($"Spawn へ戻しました: {spawnCell.x},{spawnCell.y}");
-        }
-
-        // ボタン内のアイコン Image を取得し、無ければ生成する。
-        private static Image GetOrCreateIconImage(Button button)
-        {
-            Transform existingChild = button.transform.Find("Icon");
-            if (existingChild != null && existingChild.TryGetComponent(out Image existingImage))
-            {
-                return existingImage;
-            }
-
-            GameObject iconObject = new("Icon", typeof(RectTransform), typeof(Image));
-            iconObject.transform.SetParent(button.transform, false);
-
-            RectTransform rectTransform = iconObject.GetComponent<RectTransform>();
-            rectTransform.anchorMin = Vector2.zero;
-            rectTransform.anchorMax = Vector2.one;
-            rectTransform.offsetMin = new Vector2(4f, 4f);
-            rectTransform.offsetMax = new Vector2(-4f, -4f);
-
-            return iconObject.GetComponent<Image>();
-        }
-
-        // Tile アセットから表示用スプライトを取り出す。
-        private static Sprite GetTileSprite(TileBase tileBase)
-        {
-            return tileBase is Tile tile ? tile.sprite : null;
-        }
-
-        // ドラッグ中の矩形プレビューを更新する。
-        private void UpdatePreview(Vector3Int startCell, Vector3Int endCell)
-        {
-            if (!isUiVisible)
-            {
-                HidePreview();
-                return;
-            }
-
-            int minX = Mathf.Min(startCell.x, endCell.x);
-            int maxX = Mathf.Max(startCell.x, endCell.x);
-            int minY = Mathf.Min(startCell.y, endCell.y);
-            int maxY = Mathf.Max(startCell.y, endCell.y);
-            if (!isDestroyDragging && selectedEntry != null && selectedEntry.IsSpawn)
-            {
-                // Spawn プレビューだけは最後に指している 1 マスだけ見せる。
-                minX = maxX = endCell.x;
-                minY = maxY = endCell.y;
-            }
-
-            int requiredCount = (maxX - minX + 1) * (maxY - minY + 1);
-
-            EnsurePreviewPool(requiredCount);
-
-            Sprite previewSprite = !isDestroyDragging
-                ? GetTileSprite(selectedEntry?.Tile) ?? GetFallbackPreviewSprite()
-                : GetFallbackPreviewSprite();
-
-            Color previewColor = isDestroyDragging
-                ? new Color(1f, 0.35f, 0.35f, previewAlpha)
-                : new Color(1f, 1f, 1f, previewAlpha);
-
-            int index = 0;
-            for (int y = minY; y <= maxY; y++)
-            {
-                for (int x = minX; x <= maxX; x++)
-                {
-                    SpriteRenderer renderer = previewRenderers[index++];
-                    renderer.sprite = previewSprite;
-                    renderer.color = previewColor;
-                    renderer.transform.position = grid.GetCellCenterWorld(new Vector3Int(x, y, 0));
-                    renderer.gameObject.SetActive(true);
-                }
-            }
-
-            for (int i = index; i < previewRenderers.Count; i++)
-            {
-                previewRenderers[i].gameObject.SetActive(false);
-            }
-        }
-
-        // 必要数ぶんのプレビュー用 SpriteRenderer を確保する。
-        private void EnsurePreviewPool(int requiredCount)
-        {
-            if (previewRoot == null)
-            {
-                // プレビューは専用ルート配下にまとめて生成する。
-                GameObject root = new("EditPreview");
-                root.transform.SetParent(transform, false);
-                previewRoot = root.transform;
-            }
-
-            while (previewRenderers.Count < requiredCount)
-            {
-                GameObject previewObject = new($"Preview_{previewRenderers.Count}");
-                previewObject.transform.SetParent(previewRoot, false);
-                SpriteRenderer renderer = previewObject.AddComponent<SpriteRenderer>();
-                renderer.sortingOrder = previewSortingOrder;
-                renderer.gameObject.SetActive(false);
-                previewRenderers.Add(renderer);
-            }
-        }
-
-        // いま出ているプレビューをすべて隠す。
-        private void HidePreview()
-        {
-            for (int i = 0; i < previewRenderers.Count; i++)
-            {
-                if (previewRenderers[i] != null)
-                {
-                    previewRenderers[i].gameObject.SetActive(false);
-                }
-            }
-        }
-
-        // プレビュー用の簡易白スプライトを遅延生成で作る。
-        private Sprite GetFallbackPreviewSprite()
-        {
-            if (fallbackPreviewSprite != null) return fallbackPreviewSprite;
-
-            Texture2D texture = new(1, 1, TextureFormat.RGBA32, false);
-            texture.SetPixel(0, 0, Color.white);
-            texture.Apply();
-            fallbackPreviewSprite = Sprite.Create(texture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 1f);
-            fallbackPreviewSprite.name = "EditPreviewSprite";
-            return fallbackPreviewSprite;
         }
 
         // 既存の Spawn タイルを全消去して 1 個だけに保つ。
@@ -784,7 +442,6 @@ namespace VerbGame
 
             // Ground 上に置かれた Spawn タイルそのもののセルを返す。
             BoundsInt bounds = groundTilemap.cellBounds;
-
             for (int y = bounds.yMin; y < bounds.yMax; y++)
             {
                 for (int x = bounds.xMin; x < bounds.xMax; x++)
@@ -798,32 +455,6 @@ namespace VerbGame
             }
 
             return false;
-        }
-
-        // タイル選択欄に出す表示名を ID 付きで組み立てる。
-        private static string BuildEntryLabel(WallPanelDefinition entry)
-        {
-            if (entry == null) return "なし";
-
-            string label = string.IsNullOrWhiteSpace(entry.Label) ? $"ID {entry.Id}" : entry.Label.Trim();
-            return $"{entry.Id}: {label}";
-        }
-
-        // CSV 1 行を単純なカンマ区切りで分解する。
-        private static string[] SplitCsvLine(string line)
-        {
-            return line.Split(',', StringSplitOptions.None);
-        }
-
-        // ボタン背景色を安全に差し替える共通処理。
-        private void SetButtonColor(Button button, Color color)
-        {
-            if (button == null) return;
-            Image image = button.targetGraphic as Image;
-            if (image != null)
-            {
-                image.color = color;
-            }
         }
 
         // 画面下メッセージ欄へ短い状態表示を出す。
