@@ -148,16 +148,24 @@ namespace VerbGame
                 WallPanelDefinition panel = GetPanel(cell);
                 if (panel != null && panel.BouncesDrill)
                 {
+                    if (!TryResolveBounce(panel, drillDirection, out Vector2Int bounceDirection, out bool bounceAtSurface))
+                    {
+                        return false;
+                    }
+
                     // 1セル目から硬い壁なら掘れないので不発にする。
                     if (drillPath.Count == 0) return false;
 
                     bouncedByHardWall = true;
-                    // 硬い壁セルそのものには入らない。
-                    // 直前の通常壁セルをそのまま折り返し位置にする。
+                    if (bounceAtSurface)
+                    {
+                        ApplySurfaceBounce(drillPath, out endCell, out endNormal, out bounceTurnIndex);
+                        return true;
+                    }
+
+                    drillPath.Add(cell);
                     bounceTurnIndex = drillPath.Count - 1;
-                    BuildHardWallBouncePath(drillPath);
-                    endCell = CurrentCell;
-                    endNormal = SurfaceNormal;
+                    BuildDirectedBouncePath(cell, bounceDirection, drillPath, out endCell, out endNormal);
                     return true;
                 }
 
@@ -226,7 +234,8 @@ namespace VerbGame
         public void FinishDrill(Vector3Int endCell, Vector2Int endNormal)
         {
             // ドリル終了後の位置と向きを確定する。
-            // 硬い壁で跳ね返った時は、開始地点と元の法線に戻る。
+            // 長方形の硬い壁なら開始地点へ戻り、
+            // 斜めブロックなら反射後の出口と向きを採用する。
             CurrentCell = endCell;
             SurfaceNormal = endNormal;
         }
@@ -310,5 +319,129 @@ namespace VerbGame
 
             drillPath.Add(CurrentCell);
         }
+
+        private void ApplySurfaceBounce(List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out int bounceTurnIndex)
+        {
+            // 壁セルへは入らず、直前セルを折り返し位置としてそのまま戻す。
+            bounceTurnIndex = drillPath.Count - 1;
+            BuildHardWallBouncePath(drillPath);
+            endCell = CurrentCell;
+            endNormal = SurfaceNormal;
+        }
+
+        private void BuildDirectedBouncePath(Vector3Int bounceCell, Vector2Int bounceDirection, List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal)
+        {
+            // 斜めブロックで向きを変えた後は、
+            // 新しい方向へ壁が切れるまで真っ直ぐ掘り進む。
+            Vector3Int cell = bounceCell + ToCell(bounceDirection);
+            while (HasGround(cell))
+            {
+                drillPath.Add(cell);
+                cell += ToCell(bounceDirection);
+            }
+
+            // 最後は通常ドリルと同じく、壁の外の空セルへ出る。
+            drillPath.Add(cell);
+            endCell = cell;
+            endNormal = bounceDirection;
+        }
+
+        private bool TryGetDirectionalBounce(WallPanelDirection direction, Vector2Int incomingDirection, out Vector2Int bounceDirection, out bool bounceAtSurface)
+        {
+            bounceDirection = default;
+            bounceAtSurface = false;
+
+            // inVec は「そのブロックへ進入してくるドリルの移動方向」。
+            // 各斜めブロックは対角の法線を持つものとして扱い、
+            // Dot が正なら平らな辺に当たっているので真後ろへ返す。
+            // Dot が負なら斜面側から当たっているので、
+            // Cross の符号で時計回り / 反時計回りの 90 度反射を決める。
+            if (!TryGetDirectionalNormal(direction, out Vector2Int panelNormal))
+            {
+                return false;
+            }
+
+            return TryResolveDirectionalBounce(incomingDirection, panelNormal, out bounceDirection, out bounceAtSurface);
+        }
+
+        private bool TryResolveBounce(WallPanelDefinition panel, Vector2Int incomingDirection, out Vector2Int bounceDirection, out bool bounceAtSurface)
+        {
+            bounceDirection = default;
+            bounceAtSurface = false;
+            if (panel == null || !panel.BouncesDrill) return false;
+
+            // 長方形の硬い壁も、斜めブロックの平らな面も、
+            // 「壁セルへ入らず手前で折り返す」は同じ処理へ寄せる。
+            if (panel.BouncesBackDrill)
+            {
+                bounceDirection = -incomingDirection;
+                bounceAtSurface = true;
+                return true;
+            }
+
+            if (panel.BouncesDrillByDirection)
+            {
+                return TryGetDirectionalBounce(panel.Direction, incomingDirection, out bounceDirection, out bounceAtSurface);
+            }
+
+            return false;
+        }
+
+        private bool TryGetDirectionalNormal(WallPanelDirection direction, out Vector2Int panelNormal)
+        {
+            panelNormal = default;
+            switch (direction)
+            {
+                case WallPanelDirection.RightDown:
+                    panelNormal = new Vector2Int(-1, 1);
+                    return true;
+                case WallPanelDirection.RightUp:
+                    panelNormal = new Vector2Int(-1, -1);
+                    return true;
+                case WallPanelDirection.LeftUp:
+                    panelNormal = new Vector2Int(1, -1);
+                    return true;
+                case WallPanelDirection.LeftDown:
+                    panelNormal = new Vector2Int(1, 1);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryResolveDirectionalBounce(Vector2Int incomingDirection, Vector2Int panelNormal, out Vector2Int bounceDirection, out bool bounceAtSurface)
+        {
+            bounceDirection = default;
+            bounceAtSurface = false;
+            int dot = incomingDirection.x * panelNormal.x + incomingDirection.y * panelNormal.y;
+            if (dot > 0)
+            {
+                // 平らな辺に当たった時は、長方形硬壁と同じく真後ろへ返す。
+                bounceDirection = -incomingDirection;
+                bounceAtSurface = true;
+                return true;
+            }
+
+            if (dot < 0)
+            {
+                int crossZ = panelNormal.x * incomingDirection.y - panelNormal.y * incomingDirection.x;
+                if (crossZ > 0)
+                {
+                    bounceDirection = RotateClockwise(incomingDirection);
+                    return true;
+                }
+
+                if (crossZ < 0)
+                {
+                    bounceDirection = RotateCounterClockwise(incomingDirection);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private Vector2Int RotateClockwise(Vector2Int value) => new(value.y, -value.x);
+        private Vector2Int RotateCounterClockwise(Vector2Int value) => new(-value.y, value.x);
     }
 }

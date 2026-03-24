@@ -166,7 +166,7 @@ namespace VerbGame
                 PlaySfx(drillClip);
                 view.RotateBounceThenReturn(
                     navigator.GetRotation(drillDirection),
-                    navigator.GetRotation(navigator.SurfaceNormal),
+                    navigator.GetRotation(endNormal),
                     drillRotateDuration,
                     drillPositions,
                     bounceTurnIndex,

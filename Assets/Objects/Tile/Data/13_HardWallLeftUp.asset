@@ -10,13 +10,13 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: aa4d79ffd5a776d419431242ec2b8f49, type: 3}
-  m_Name: 03_HardWall
+  m_Name: 13_HardWallLeftUp
   m_EditorClassIdentifier: Assembly-CSharp::VerbGame.WallPanelDefinition
-  id: 3
-  label: HardWall
-  tile: {fileID: 11400000, guid: bc6686996ac6a4f40ba057dd0327ddd2, type: 2}
+  id: 13
+  label: HardWallLeftUp
+  tile: {fileID: 11400000, guid: 57e55a5d63db8514da84579c77d9a07d, type: 2}
   drillBehavior: 1
-  direction: 1
+  direction: 4
   slipBehavior: 0
   isGoal: 0
   isSpawn: 0

@@ -16,6 +16,7 @@ MonoBehaviour:
   label: Spawn
   tile: {fileID: 11400000, guid: 7eaf34732493b034286a15b70c13e4e4, type: 2}
   drillBehavior: 0
+  direction: 0
   slipBehavior: 0
   isGoal: 0
   isSpawn: 1

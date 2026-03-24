@@ -16,6 +16,7 @@ MonoBehaviour:
   label: Dirt
   tile: {fileID: 11400000, guid: 2b45b65cf037f2e4994b3bc5dc263a76, type: 2}
   drillBehavior: 0
+  direction: 0
   slipBehavior: 0
   isGoal: 0
   isSpawn: 0

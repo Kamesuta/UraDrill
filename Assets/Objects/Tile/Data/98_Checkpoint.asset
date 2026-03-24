@@ -16,6 +16,7 @@ MonoBehaviour:
   label: Checkpoint
   tile: {fileID: 11400000, guid: 07ef291df536a3241897ca0cff71f4e7, type: 2}
   drillBehavior: 0
+  direction: 0
   slipBehavior: 0
   isGoal: 1
   isSpawn: 0

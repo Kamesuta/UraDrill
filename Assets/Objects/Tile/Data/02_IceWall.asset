@@ -16,6 +16,7 @@ MonoBehaviour:
   label: Ice
   tile: {fileID: 11400000, guid: da12fc97783c6d74e9111b1cf24993a0, type: 2}
   drillBehavior: 0
+  direction: 0
   slipBehavior: 1
   isGoal: 0
   isSpawn: 0
