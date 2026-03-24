@@ -17923,6 +17923,17 @@ Camera:
   m_CorrespondingSourceObject: {fileID: 3353661103559876936, guid: 46bc02c3e1eb6084a9227816f372cf1d, type: 3}
   m_PrefabInstance: {fileID: 1784639825581667715}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &6338674642556379423 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 5706957344036230300, guid: 46bc02c3e1eb6084a9227816f372cf1d, type: 3}
+  m_PrefabInstance: {fileID: 1784639825581667715}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7ef3f73e96b484244a5082f453d00bb0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CameraController
 --- !u!1001 &2457567511148076048
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -18067,6 +18078,10 @@ PrefabInstance:
       propertyPath: playerTransform
       value: 
       objectReference: {fileID: 8655636803736125407}
+    - target: {fileID: 40567708284404900, guid: e057390f6d4643646b9e491c2fcad806, type: 3}
+      propertyPath: cameraController
+      value: 
+      objectReference: {fileID: 6338674642556379423}
     - target: {fileID: 771013274831196011, guid: e057390f6d4643646b9e491c2fcad806, type: 3}
       propertyPath: m_AnchorMax.y
       value: 0

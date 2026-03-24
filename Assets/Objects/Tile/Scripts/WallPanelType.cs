@@ -1,5 +1,12 @@
 namespace VerbGame
 {
+    // タイルがどの Tilemap レイヤーへ置かれるかを表す。
+    public enum WallPanelLayer
+    {
+        Ground = 0,
+        Overlay = 1,
+    }
+
     public enum WallPanelType
     {
         Spawn = -1,

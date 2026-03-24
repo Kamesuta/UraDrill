@@ -109,6 +109,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::VerbGame.PlayerController
   grid: {fileID: 0}
   groundTilemap: {fileID: 0}
+  overlayTilemap: {fileID: 0}
   wallPanelCatalog: {fileID: 11400000, guid: d146e78d2a5ed7445902f14004d31c15, type: 2}
   moveDuration: 0.15
   moveRepeatDelay: 0.12

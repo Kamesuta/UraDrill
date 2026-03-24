@@ -21,8 +21,14 @@ namespace VerbGame
         private readonly WallPanelCatalog tileCatalog;
         private readonly float tileIconSize;
         private readonly Action<WallPanelDefinition> onSelectionChanged;
-        private readonly List<Button> tileButtons = new();
+        private readonly List<TileButtonBinding> tileButtons = new();
         private readonly List<WallPanelDefinition> selectableEntries = new();
+
+        // Ground / Overlay を別行へ分けるためのコンテナ。
+        private RectTransform groundRow;
+        private RectTransform overlayRow;
+        private Button groundTileButtonTemplate;
+        private Button overlayTileButtonTemplate;
 
         public LevelEditModeTilePalette(
             RectTransform tileListContent,
@@ -46,35 +52,25 @@ namespace VerbGame
         // パレットの内容からタイル選択ボタンを動的生成する。
         public void Build()
         {
-            if (tileButtonTemplate == null || tileListContent == null || tileCatalog == null) return;
+            if (tileListContent == null || tileCatalog == null) return;
 
-            // タイル一覧はテンプレートから横並びで動的生成する。
-            ConfigureTileListLayout();
-            tileButtonTemplate.gameObject.SetActive(false);
+            // 2 段分の行とテンプレートはプレハブ側で用意済みなので、
+            // ここでは参照を拾って既存の動的生成物だけを掃除する。
+            if (!TryResolveRowReferences()) return;
+            DestroyGeneratedButtons();
+
+            groundTileButtonTemplate.gameObject.SetActive(false);
+            overlayTileButtonTemplate.gameObject.SetActive(false);
             tileButtons.Clear();
             selectableEntries.Clear();
 
             IReadOnlyList<WallPanelDefinition> entries = tileCatalog.PanelDefinitions;
             if (entries == null) return;
 
-            for (int i = 0; i < entries.Count; i++)
-            {
-                WallPanelDefinition entry = entries[i];
-                if (entry == null || entry.Id == 0 || entry.Tile == null) continue;
-
-                Button button = UnityEngine.Object.Instantiate(tileButtonTemplate, tileListContent);
-                button.gameObject.name = $"TileButton_{entry.Id}";
-                button.gameObject.SetActive(true);
-                // ボタン押下時はこのエントリを選択状態へ切り替える。
-                button.onClick.AddListener(() => SelectEntry(entry));
-
-                ConfigureTileButtonVisual(button, entry);
-                HideButtonLabel(button);
-
-                selectableEntries.Add(entry);
-                tileButtons.Add(button);
-            }
-
+            // 1 段目と 2 段目の順序が崩れないよう、
+            // Ground -> Overlay の順で走査して配置する。
+            BuildRow(entries, WallPanelLayer.Ground, groundRow, groundTileButtonTemplate);
+            BuildRow(entries, WallPanelLayer.Overlay, overlayRow, overlayTileButtonTemplate);
             SelectFirstAvailableEntry(entries);
         }
 
@@ -108,7 +104,7 @@ namespace VerbGame
             for (int i = 0; i < entries.Count; i++)
             {
                 WallPanelDefinition entry = entries[i];
-                if (entry == null || entry.Id == 0 || entry.Tile == null) continue;
+                if (!IsSelectable(entry)) continue;
                 SelectEntry(entry);
                 return;
             }
@@ -119,35 +115,71 @@ namespace VerbGame
         {
             for (int i = 0; i < tileButtons.Count; i++)
             {
-                Button button = tileButtons[i];
-                if (button == null) continue;
+                TileButtonBinding binding = tileButtons[i];
+                if (binding.Button == null) continue;
 
-                bool isSelected = button.name == $"TileButton_{SelectedEntry?.Id}";
-                SetButtonColor(button, isSelected ? SelectedButtonColor : DefaultButtonColor);
+                bool isSelected = binding.Entry == SelectedEntry;
+                SetButtonColor(binding.Button, isSelected ? SelectedButtonColor : DefaultButtonColor);
             }
         }
 
-        // タイル一覧コンテナを横並びレイアウトに整える。
-        private void ConfigureTileListLayout()
+        private bool TryResolveRowReferences()
         {
-            // タイル一覧は横スクロール前提の横並び。
-            if (!tileListContent.TryGetComponent<HorizontalLayoutGroup>(out var horizontalLayout))
-            {
-                horizontalLayout = tileListContent.gameObject.AddComponent<HorizontalLayoutGroup>();
-            }
+            groundRow = tileListContent.Find("Ground") as RectTransform;
+            overlayRow = tileListContent.Find("Overlay") as RectTransform;
+            groundTileButtonTemplate = groundRow != null ? groundRow.Find("TileButtonTemplate")?.GetComponent<Button>() : null;
+            overlayTileButtonTemplate = overlayRow != null ? overlayRow.Find("TileButtonTemplate")?.GetComponent<Button>() : null;
 
-            horizontalLayout.spacing = 8f;
-            horizontalLayout.padding = new RectOffset(8, 8, 8, 8);
-            horizontalLayout.childAlignment = TextAnchor.MiddleLeft;
-            horizontalLayout.childControlWidth = false;
-            horizontalLayout.childControlHeight = false;
-            horizontalLayout.childForceExpandWidth = false;
-            horizontalLayout.childForceExpandHeight = false;
+            return groundRow != null &&
+                   overlayRow != null &&
+                   groundTileButtonTemplate != null &&
+                   overlayTileButtonTemplate != null;
+        }
 
-            if (tileListContent.TryGetComponent<VerticalLayoutGroup>(out var verticalLayout))
+        private void BuildRow(IReadOnlyList<WallPanelDefinition> entries, WallPanelLayer layer, RectTransform row, Button buttonTemplate)
+        {
+            for (int i = 0; i < entries.Count; i++)
             {
-                verticalLayout.enabled = false;
+                WallPanelDefinition entry = entries[i];
+                if (!IsSelectable(entry) || entry.Layer != layer) continue;
+
+                Button button = UnityEngine.Object.Instantiate(buttonTemplate, row);
+                button.gameObject.name = $"TileButton_{entry.PaletteKey}";
+                button.gameObject.SetActive(true);
+                // ボタン押下時はこのエントリを選択状態へ切り替える。
+                button.onClick.AddListener(() => SelectEntry(entry));
+
+                ConfigureTileButtonVisual(button, entry);
+                HideButtonLabel(button);
+
+                selectableEntries.Add(entry);
+                tileButtons.Add(new TileButtonBinding(entry, button));
             }
+        }
+
+        private void DestroyGeneratedButtons()
+        {
+            if (tileListContent == null) return;
+
+            Button[] buttons = tileListContent.GetComponentsInChildren<Button>(true);
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                Button button = buttons[i];
+                if (button == null ||
+                    button == groundTileButtonTemplate ||
+                    button == overlayTileButtonTemplate)
+                {
+                    continue;
+                }
+
+                UnityEngine.Object.Destroy(button.gameObject);
+            }
+        }
+
+        private static bool IsSelectable(WallPanelDefinition entry)
+        {
+            if (entry == null || entry.Tile == null) return false;
+            return entry.HasId;
         }
 
         // タイル選択ボタンにスプライト見た目を設定する。
@@ -222,6 +254,18 @@ namespace VerbGame
             {
                 image.color = color;
             }
+        }
+
+        private readonly struct TileButtonBinding
+        {
+            public TileButtonBinding(WallPanelDefinition entry, Button button)
+            {
+                Entry = entry;
+                Button = button;
+            }
+
+            public WallPanelDefinition Entry { get; }
+            public Button Button { get; }
         }
     }
 }

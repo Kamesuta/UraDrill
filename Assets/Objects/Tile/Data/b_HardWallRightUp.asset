@@ -10,13 +10,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: aa4d79ffd5a776d419431242ec2b8f49, type: 3}
-  m_Name: 11_HardWallRightDown
+  m_Name: b_HardWallRightUp
   m_EditorClassIdentifier: Assembly-CSharp::VerbGame.WallPanelDefinition
-  id: 11
-  label: HardWallRightDown
-  tile: {fileID: 11400000, guid: 236d9a8a436c648438bd98c3a5b228d8, type: 2}
+  id: b
+  layer: 1
+  label: HardWallRightUp
+  tile: {fileID: 11400000, guid: ce20d9bbb4d5f034bb54011570c09f2e, type: 2}
   drillBehavior: 1
-  direction: 2
+  direction: 3
   slipBehavior: 0
   isGoal: 0
   isSpawn: 0

@@ -10,9 +10,10 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: aa4d79ffd5a776d419431242ec2b8f49, type: 3}
-  m_Name: 13_HardWallLeftUp
+  m_Name: c_HardWallLeftUp
   m_EditorClassIdentifier: Assembly-CSharp::VerbGame.WallPanelDefinition
-  id: 13
+  id: c
+  layer: 1
   label: HardWallLeftUp
   tile: {fileID: 11400000, guid: 57e55a5d63db8514da84579c77d9a07d, type: 2}
   drillBehavior: 1

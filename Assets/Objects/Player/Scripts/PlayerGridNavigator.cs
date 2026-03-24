@@ -15,6 +15,8 @@ namespace VerbGame
         private readonly Grid grid;
         // 地形が存在するかどうかを判定する相手。
         private readonly Tilemap groundTilemap;
+        // Ground に重ねる特殊タイル用レイヤー。
+        private readonly Tilemap overlayTilemap;
         // 地形タイルと特殊パネル定義の対応表。
         private readonly WallPanelCatalog wallPanelCatalog;
 
@@ -23,10 +25,11 @@ namespace VerbGame
         // 今張り付いている地形面の法線。
         public Vector2Int SurfaceNormal { get; private set; } = Vector2Int.up;
 
-        public PlayerGridNavigator(Grid grid, Tilemap groundTilemap, WallPanelCatalog wallPanelCatalog)
+        public PlayerGridNavigator(Grid grid, Tilemap groundTilemap, Tilemap overlayTilemap, WallPanelCatalog wallPanelCatalog)
         {
             this.grid = grid;
             this.groundTilemap = groundTilemap;
+            this.overlayTilemap = overlayTilemap;
             this.wallPanelCatalog = wallPanelCatalog;
         }
 
@@ -64,7 +67,7 @@ namespace VerbGame
             spawnNormal = Vector2Int.up;
             if (groundTilemap == null) return false;
 
-            BoundsInt bounds = groundTilemap.cellBounds;
+            BoundsInt bounds = GetSearchBounds();
             Vector2Int[] searchOrder = { Vector2Int.up, Vector2Int.right, Vector2Int.left, Vector2Int.down };
 
             for (int y = bounds.yMin; y < bounds.yMax; y++)
@@ -253,7 +256,21 @@ namespace VerbGame
 
         public WallPanelDefinition GetPanel(Vector3Int cell)
         {
+            // Overlay があれば、まずそちらの特殊効果を優先する。
+            TileBase tile = overlayTilemap != null ? overlayTilemap.GetTile(cell) : null;
+            tile ??= groundTilemap != null ? groundTilemap.GetTile(cell) : null;
+            return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
+        }
+
+        private WallPanelDefinition GetGroundPanel(Vector3Int cell)
+        {
             TileBase tile = groundTilemap != null ? groundTilemap.GetTile(cell) : null;
+            return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
+        }
+
+        private WallPanelDefinition GetOverlayPanel(Vector3Int cell)
+        {
+            TileBase tile = overlayTilemap != null ? overlayTilemap.GetTile(cell) : null;
             return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
         }
 
@@ -266,7 +283,8 @@ namespace VerbGame
 
         public bool IsTouchingCheckpoint()
         {
-            return GetPanel(CurrentCell - ToCell(SurfaceNormal))?.IsGoal ?? false;
+            // Checkpoint は Spawn と同様に「プレイヤーがいる空セル側」の Overlay へ置く前提。
+            return GetPanel(CurrentCell)?.IsGoal ?? false;
         }
 
         private bool CanAttachToNonIceSurface(Vector3Int cell, Vector2Int normal)
@@ -310,7 +328,24 @@ namespace VerbGame
 
         private bool IsSpawnCell(Vector3Int cell)
         {
-            return GetPanel(cell)?.IsSpawn ?? false;
+            return GetOverlayPanel(cell)?.IsSpawn ?? false;
+        }
+
+        private BoundsInt GetSearchBounds()
+        {
+            BoundsInt groundBounds = groundTilemap != null ? groundTilemap.cellBounds : default;
+            BoundsInt overlayBounds = overlayTilemap != null ? overlayTilemap.cellBounds : default;
+
+            if (overlayTilemap == null)
+            {
+                return groundBounds;
+            }
+
+            int xMin = Mathf.Min(groundBounds.xMin, overlayBounds.xMin);
+            int yMin = Mathf.Min(groundBounds.yMin, overlayBounds.yMin);
+            int xMax = Mathf.Max(groundBounds.xMax, overlayBounds.xMax);
+            int yMax = Mathf.Max(groundBounds.yMax, overlayBounds.yMax);
+            return new BoundsInt(xMin, yMin, 0, xMax - xMin, yMax - yMin, 1);
         }
 
         private void BuildHardWallBouncePath(List<Vector3Int> drillPath)

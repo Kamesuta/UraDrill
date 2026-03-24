@@ -19,6 +19,7 @@ namespace VerbGame
         [SerializeField] private Grid grid;
         // 地形タイルの有無だけを見たいので Tilemap を直接参照する。
         [SerializeField] private Tilemap groundTilemap;
+        [SerializeField] private Tilemap overlayTilemap;
         [SerializeField] private WallPanelCatalog wallPanelCatalog;
 
         // 通常の1ステップ移動時間。
@@ -64,7 +65,7 @@ namespace VerbGame
         private void Awake()
         {
             // ロジック担当と見た目担当をここで組み立てる。
-            navigator = new PlayerGridNavigator(grid, groundTilemap, wallPanelCatalog);
+            navigator = new PlayerGridNavigator(grid, groundTilemap, overlayTilemap, wallPanelCatalog);
             view = new PlayerView(transform, GetComponentInChildren<Animator>());
             EnsureAudioSource();
             EnsureClearObject();

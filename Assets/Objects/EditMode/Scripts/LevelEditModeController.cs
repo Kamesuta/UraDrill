@@ -17,6 +17,7 @@ namespace VerbGame
         [SerializeField] private CameraController cameraController;
         [SerializeField] private Grid grid;
         [SerializeField] private Tilemap groundTilemap;
+        [SerializeField] private Tilemap overlayTilemap;
         [FormerlySerializedAs("tilePalette")]
         [SerializeField] private WallPanelCatalog tileCatalog;
         [SerializeField] private Transform playerTransform;
@@ -85,7 +86,7 @@ namespace VerbGame
             }
 
             // UI を閉じている間は入力を無視し、プレビューだけ確実に消す。
-            if (!isUiVisible || Mouse.current == null || worldCamera == null || grid == null || groundTilemap == null)
+            if (!isUiVisible || Mouse.current == null || worldCamera == null || grid == null || groundTilemap == null || overlayTilemap == null)
             {
                 preview?.Hide();
                 return;
@@ -262,6 +263,12 @@ namespace VerbGame
             int maxY = Mathf.Max(startCell.y, endCell.y);
 
             WallPanelDefinition selectedEntry = tilePalette?.SelectedEntry;
+            if (selectedEntry == null)
+            {
+                SetMessage("選択タイルがありません");
+                return;
+            }
+
             bool isSpawnTile = selectedEntry != null && selectedEntry.IsSpawn;
             if (!destroyTiles && isSpawnTile)
             {
@@ -270,10 +277,17 @@ namespace VerbGame
                 minY = maxY = endCell.y;
             }
 
-            TileBase tileToPaint = selectedEntry?.Tile;
+            TileBase tileToPaint = selectedEntry.Tile;
             if (!destroyTiles && tileToPaint == null)
             {
                 SetMessage("選択タイルがありません");
+                return;
+            }
+
+            Tilemap targetTilemap = GetTargetTilemap(selectedEntry);
+            if (targetTilemap == null)
+            {
+                SetMessage("対象レイヤーが見つかりません");
                 return;
             }
 
@@ -288,11 +302,11 @@ namespace VerbGame
                 for (int x = minX; x <= maxX; x++)
                 {
                     Vector3Int cell = new(x, y, 0);
-                    groundTilemap.SetTile(cell, destroyTiles ? null : tileToPaint);
+                    targetTilemap.SetTile(cell, destroyTiles ? null : tileToPaint);
                 }
             }
 
-            groundTilemap.CompressBounds();
+            targetTilemap.CompressBounds();
             RefreshSpawnTileVisibility();
             SetMessage($"{(destroyTiles ? "破壊" : "配置")} [{minX},{minY}] - [{maxX},{maxY}]");
         }
@@ -313,7 +327,7 @@ namespace VerbGame
         // Ground 全体を CSV にしてクリップボードへ書き出す。
         private void ExportToClipboard()
         {
-            if (!LevelEditModeCsvUtility.TryBuildCsv(groundTilemap, tileCatalog, out string csv, out BoundsInt bounds, out string errorMessage))
+            if (!LevelEditModeCsvUtility.TryBuildCsv(groundTilemap, overlayTilemap, tileCatalog, out string csv, out BoundsInt bounds, out string errorMessage))
             {
                 SetMessage(errorMessage);
                 return;
@@ -327,7 +341,7 @@ namespace VerbGame
         private void ImportFromClipboard()
         {
             string csv = GUIUtility.systemCopyBuffer;
-            if (!LevelEditModeCsvUtility.TryImportCsv(groundTilemap, tileCatalog, csv, out int importedCount, out string errorMessage))
+            if (!LevelEditModeCsvUtility.TryImportCsv(groundTilemap, overlayTilemap, tileCatalog, csv, out int importedCount, out string errorMessage))
             {
                 SetMessage(errorMessage);
                 return;
@@ -367,18 +381,18 @@ namespace VerbGame
         // 既存の Spawn タイルを全消去して 1 個だけに保つ。
         private void ClearExistingSpawnTiles()
         {
-            if (groundTilemap == null || tileCatalog == null) return;
+            if (overlayTilemap == null || tileCatalog == null) return;
 
             // Spawn は 1 個だけに保つ。
-            BoundsInt bounds = groundTilemap.cellBounds;
+            BoundsInt bounds = overlayTilemap.cellBounds;
             for (int y = bounds.yMin; y < bounds.yMax; y++)
             {
                 for (int x = bounds.xMin; x < bounds.xMax; x++)
                 {
                     Vector3Int cell = new(x, y, 0);
-                    TileBase tile = groundTilemap.GetTile(cell);
+                    TileBase tile = overlayTilemap.GetTile(cell);
                     if (!tileCatalog.TryGetPanelByTile(tile, out WallPanelDefinition entry) || !entry.IsSpawn) continue;
-                    groundTilemap.SetTile(cell, null);
+                    overlayTilemap.SetTile(cell, null);
                 }
             }
         }
@@ -386,10 +400,10 @@ namespace VerbGame
         // Spawn タイルだけ、編集モード時に見せて通常時は隠す。
         private void RefreshSpawnTileVisibility()
         {
-            if (groundTilemap == null || tileCatalog == null) return;
+            if (overlayTilemap == null || tileCatalog == null) return;
 
             // Spawn はデータとしては常に存在するが、通常プレイ中は視覚ノイズになるので隠す。
-            BoundsInt bounds = groundTilemap.cellBounds;
+            BoundsInt bounds = overlayTilemap.cellBounds;
             Color tileColor = isUiVisible ? Color.white : new Color(1f, 1f, 1f, 0f);
 
             for (int y = bounds.yMin; y < bounds.yMax; y++)
@@ -397,11 +411,11 @@ namespace VerbGame
                 for (int x = bounds.xMin; x < bounds.xMax; x++)
                 {
                     Vector3Int cell = new(x, y, 0);
-                    TileBase tile = groundTilemap.GetTile(cell);
+                    TileBase tile = overlayTilemap.GetTile(cell);
                     if (!tileCatalog.TryGetPanelByTile(tile, out WallPanelDefinition entry) || !entry.IsSpawn) continue;
 
-                    groundTilemap.SetTileFlags(cell, TileFlags.None);
-                    groundTilemap.SetColor(cell, tileColor);
+                    overlayTilemap.SetTileFlags(cell, TileFlags.None);
+                    overlayTilemap.SetColor(cell, tileColor);
                 }
             }
         }
@@ -434,20 +448,20 @@ namespace VerbGame
             }
         }
 
-        // Ground 上から Spawn タイルのセルを探して返す。
+        // Overlay 上から Spawn タイルのセルを探して返す。
         private bool TryFindSpawnCell(out Vector3Int spawnCell)
         {
             spawnCell = default;
-            if (groundTilemap == null || tileCatalog == null) return false;
+            if (overlayTilemap == null || tileCatalog == null) return false;
 
-            // Ground 上に置かれた Spawn タイルそのもののセルを返す。
-            BoundsInt bounds = groundTilemap.cellBounds;
+            // Overlay 上に置かれた Spawn タイルそのもののセルを返す。
+            BoundsInt bounds = overlayTilemap.cellBounds;
             for (int y = bounds.yMin; y < bounds.yMax; y++)
             {
                 for (int x = bounds.xMin; x < bounds.xMax; x++)
                 {
                     Vector3Int tileCell = new(x, y, 0);
-                    TileBase tile = groundTilemap.GetTile(tileCell);
+                    TileBase tile = overlayTilemap.GetTile(tileCell);
                     if (!tileCatalog.TryGetPanelByTile(tile, out WallPanelDefinition entry) || !entry.IsSpawn) continue;
                     spawnCell = tileCell;
                     return true;
@@ -467,6 +481,12 @@ namespace VerbGame
                     ? operationGuide
                     : $"{operationGuide}\n{message}";
             }
+        }
+
+        private Tilemap GetTargetTilemap(WallPanelDefinition entry)
+        {
+            if (entry == null) return null;
+            return entry.IsOverlay ? overlayTilemap : groundTilemap;
         }
     }
 }

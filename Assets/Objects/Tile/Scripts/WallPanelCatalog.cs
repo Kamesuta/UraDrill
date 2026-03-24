@@ -11,7 +11,8 @@ namespace VerbGame
         [SerializeField] private WallPanelDefinition[] panelDefinitions;
 
         private Dictionary<TileBase, WallPanelDefinition> tileLookup;
-        private Dictionary<int, WallPanelDefinition> idLookup;
+        private Dictionary<int, WallPanelDefinition> numericIdLookup;
+        private Dictionary<string, WallPanelDefinition> stringIdLookup;
         private List<WallPanelDefinition> definitions;
 
         public WallPanelDefinition DefaultPanel => defaultPanel;
@@ -38,15 +39,32 @@ namespace VerbGame
             return definition != null;
         }
 
-        public bool TryGetPanelById(int id, out WallPanelDefinition definition)
+        public bool TryGetPanelByGroundId(int id, out WallPanelDefinition definition)
         {
             EnsureLookup();
-            return idLookup.TryGetValue(id, out definition);
+            return numericIdLookup.TryGetValue(id, out definition);
         }
 
-        public TileBase GetTile(int id)
+        public bool TryGetPanelByOverlayId(string overlayId, out WallPanelDefinition definition)
         {
-            return TryGetPanelById(id, out WallPanelDefinition definition) ? definition.Tile : null;
+            EnsureLookup();
+            if (string.IsNullOrWhiteSpace(overlayId))
+            {
+                definition = null;
+                return false;
+            }
+
+            return stringIdLookup.TryGetValue(overlayId, out definition);
+        }
+
+        public TileBase GetGroundTile(int id)
+        {
+            return TryGetPanelByGroundId(id, out WallPanelDefinition definition) ? definition.Tile : null;
+        }
+
+        public TileBase GetOverlayTile(string overlayId)
+        {
+            return TryGetPanelByOverlayId(overlayId, out WallPanelDefinition definition) ? definition.Tile : null;
         }
 
         private void OnEnable() => InvalidateLookup();
@@ -55,16 +73,18 @@ namespace VerbGame
         private void InvalidateLookup()
         {
             tileLookup = null;
-            idLookup = null;
+            numericIdLookup = null;
+            stringIdLookup = null;
             definitions = null;
         }
 
         private void EnsureLookup()
         {
-            if (tileLookup != null && idLookup != null && definitions != null) return;
+            if (tileLookup != null && numericIdLookup != null && stringIdLookup != null && definitions != null) return;
 
             tileLookup = new Dictionary<TileBase, WallPanelDefinition>();
-            idLookup = new Dictionary<int, WallPanelDefinition>();
+            numericIdLookup = new Dictionary<int, WallPanelDefinition>();
+            stringIdLookup = new Dictionary<string, WallPanelDefinition>();
             definitions = new List<WallPanelDefinition>();
 
             AddDefinition(defaultPanel);
@@ -87,9 +107,14 @@ namespace VerbGame
                 tileLookup[definition.Tile] = definition;
             }
 
-            if (definition.Id != 0)
+            if (definition.TryGetNumericId(out int numericId))
             {
-                idLookup[definition.Id] = definition;
+                numericIdLookup[numericId] = definition;
+            }
+
+            if (definition.HasId)
+            {
+                stringIdLookup[definition.Id] = definition;
             }
         }
     }
