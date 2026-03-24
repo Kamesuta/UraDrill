@@ -9,45 +9,37 @@ using Tile = UnityEngine.Tilemaps.Tile;
 namespace VerbGame
 {
     // タイル選択 UI の構築と選択状態だけを担当する。
-    public sealed class LevelEditModeTilePalette
+    public sealed class LevelEditModeTilePalette : MonoBehaviour
     {
         // 選択中タイルだけ視覚的に強調するための色。
         private static readonly Color SelectedButtonColor = new(0.86f, 0.77f, 0.28f, 1f);
         // 非選択状態の通常色。
         private static readonly Color DefaultButtonColor = new(0.24f, 0.24f, 0.24f, 0.94f);
 
-        private readonly RectTransform tileListContent;
-        private readonly Button tileButtonTemplate;
-        private readonly WallPanelCatalog tileCatalog;
-        private readonly float tileIconSize;
-        private readonly Action<WallPanelDefinition> onSelectionChanged;
+        [SerializeField] private WallPanelCatalog tileCatalog;
+        [SerializeField] private float tileIconSize = 48f;
+
         private readonly List<TileButtonBinding> tileButtons = new();
         private readonly List<WallPanelDefinition> selectableEntries = new();
 
         // Ground / Overlay を別行へ分けるためのコンテナ。
+        private RectTransform tileListContent;
         private RectTransform groundRow;
         private RectTransform overlayRow;
         private Button groundTileButtonTemplate;
         private Button overlayTileButtonTemplate;
 
-        public LevelEditModeTilePalette(
-            RectTransform tileListContent,
-            Button tileButtonTemplate,
-            WallPanelCatalog tileCatalog,
-            float tileIconSize,
-            Action<WallPanelDefinition> onSelectionChanged)
-        {
-            this.tileListContent = tileListContent;
-            this.tileButtonTemplate = tileButtonTemplate;
-            this.tileCatalog = tileCatalog;
-            this.tileIconSize = tileIconSize;
-            this.onSelectionChanged = onSelectionChanged;
-        }
-
         // ホイール切り替えで参照する、実際に選択可能なタイル一覧。
         public IReadOnlyList<WallPanelDefinition> SelectableEntries => selectableEntries;
         // 現在選択中のタイル定義。
         public WallPanelDefinition SelectedEntry { get; private set; }
+        public WallPanelCatalog TileCatalog => tileCatalog;
+        public event Action<WallPanelDefinition> SelectionChanged;
+
+        private void Awake()
+        {
+            tileListContent = transform as RectTransform;
+        }
 
         // パレットの内容からタイル選択ボタンを動的生成する。
         public void Build()
@@ -95,7 +87,7 @@ namespace VerbGame
         {
             SelectedEntry = entry;
             UpdateTileButtonHighlights();
-            onSelectionChanged?.Invoke(entry);
+            SelectionChanged?.Invoke(entry);
         }
 
         // 最初に選ぶタイルを、パレット先頭の有効エントリから決める。
@@ -172,7 +164,7 @@ namespace VerbGame
                     continue;
                 }
 
-                UnityEngine.Object.Destroy(button.gameObject);
+                Destroy(button.gameObject);
             }
         }
 

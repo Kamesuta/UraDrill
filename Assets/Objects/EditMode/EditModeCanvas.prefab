@@ -353,16 +353,13 @@ MonoBehaviour:
   grid: {fileID: 0}
   groundTilemap: {fileID: 0}
   overlayTilemap: {fileID: 0}
-  tileCatalog: {fileID: 11400000, guid: d146e78d2a5ed7445902f14004d31c15, type: 2}
   playerTransform: {fileID: 0}
   uiRoot: {fileID: 4325440782277107033}
-  tileListContent: {fileID: 2600550325731110469}
-  tileButtonTemplate: {fileID: 0}
+  tilePalette: {fileID: 1198171170352159383}
   respawnButton: {fileID: 1315388626175224024}
   exportButton: {fileID: 8860263737772049106}
   importButton: {fileID: 2726620747835366108}
   messageLabel: {fileID: 3959485941040242577}
-  tileIconSize: 48
   previewAlpha: 0.35
   previewSortingOrder: 10
 --- !u!1 &1739259695428822978
@@ -2117,6 +2114,7 @@ GameObject:
   - component: {fileID: 7860995141151944240}
   - component: {fileID: 7345390031862514476}
   - component: {fileID: 1198171170352159382}
+  - component: {fileID: 1198171170352159383}
   - component: {fileID: 4178638417549815984}
   m_Layer: 0
   m_Name: TileList
@@ -2210,6 +2208,20 @@ MonoBehaviour:
   m_ChildScaleWidth: 0
   m_ChildScaleHeight: 0
   m_ReverseArrangement: 0
+--- !u!114 &1198171170352159383
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8562825688643546031}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f127cd681bec7f94b9baa747a0996907, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VerbGame.LevelEditModeTilePalette
+  tileCatalog: {fileID: 11400000, guid: d146e78d2a5ed7445902f14004d31c15, type: 2}
+  tileIconSize: 48
 --- !u!114 &4178638417549815984
 MonoBehaviour:
   m_ObjectHideFlags: 0
