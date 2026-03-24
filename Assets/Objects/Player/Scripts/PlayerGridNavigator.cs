@@ -11,10 +11,6 @@ namespace VerbGame
     {
         // 地形面の候補になる4方向。
         private static readonly Vector2Int[] Cardinals = { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left };
-        // 次セル探索に使う近傍。
-        // 角回り込みのため、斜めも含めて見る。
-        private static readonly Vector2Int[] Neighbors = { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left, new(1, 1), new(1, -1), new(-1, -1), new(-1, 1) };
-
         // 座標変換用。
         private readonly Grid grid;
         // 地形が存在するかどうかを判定する相手。
@@ -98,42 +94,38 @@ namespace VerbGame
         {
             // 現在の面法線に直交するベクトルが「壁沿いの進行方向」。
             Vector2Int tangent = GetTangent(SurfaceNormal) * direction;
-            float bestScore = float.NegativeInfinity;
             bestCell = CurrentCell;
             bestNormal = SurfaceNormal;
 
-            // 凹角では、まずその場で別面に張り付く1手を優先する。
+            // 1. 同じ面をそのまま進めるなら、それが最も自然な1手。
+            Vector3Int straightCell = CurrentCell + ToCell(tangent);
+            if (IsBoundaryCell(straightCell, SurfaceNormal))
+            {
+                bestCell = straightCell;
+                return true;
+            }
+
+            // 2. 直進できない時は、前方の角を回り込む。
+            // 凸角でも凹角でも、論理上は「斜め1セル + 面法線変更」で表せる。
+            Vector2Int cornerNormal = tangent;
+            Vector3Int cornerCell = CurrentCell + ToCell(tangent - SurfaceNormal);
+            if (IsBoundaryCell(cornerCell, cornerNormal))
+            {
+                bestCell = cornerCell;
+                bestNormal = cornerNormal;
+                return true;
+            }
+
+            // 3. 最後に、その場で面だけ切り替える凹角ターンを試す。
+            // 窪みの底や天井際では、この1手で向き直してから次の直進へつなぐ。
             Vector2Int turnNormal = -tangent;
-            if (HasGround(CurrentCell + ToCell(tangent)) && HasGround(CurrentCell - ToCell(turnNormal)))
+            if (IsBoundaryCell(CurrentCell, turnNormal) && HasGround(CurrentCell + ToCell(tangent)))
             {
                 bestNormal = turnNormal;
                 return true;
             }
 
-            // 近傍候補を全部なめて、最も自然に進める1手を探す。
-            foreach (var offset in Neighbors)
-            {
-                Vector3Int candidate = CurrentCell + ToCell(offset);
-                if (HasGround(candidate)) continue;
-
-                foreach (var normal in Cardinals)
-                {
-                    // 候補セルが地形に接していなければ、境界移動としては無効。
-                    if (!HasGround(candidate - ToCell(normal))) continue;
-
-                    // 前進成分を最優先しつつ、今の面と近い法線を少し優遇する。
-                    float forward = Vector2.Dot(((Vector2)offset).normalized, tangent);
-                    float score = forward * 10f + Vector2.Dot(normal, SurfaceNormal) * 2f + (offset.sqrMagnitude == 1 ? 0.25f : 0f);
-                    if (forward < 0f) score += forward * 4f;
-                    if (score <= bestScore) continue;
-
-                    bestScore = score;
-                    bestCell = candidate;
-                    bestNormal = normal;
-                }
-            }
-
-            return bestScore > float.NegativeInfinity;
+            return false;
         }
 
         public bool TryBuildDrillPath(out Vector2Int drillDirection, out List<Vector3Int> drillPath, out Vector3Int endCell, out Vector2Int endNormal, out bool bouncedByHardWall, out int bounceTurnIndex)
@@ -293,6 +285,14 @@ namespace VerbGame
             TileBase tile = groundTilemap.GetTile(cell);
             if (tile == null) return false;
             return !IsSpawnCell(cell);
+        }
+
+        private bool IsBoundaryCell(Vector3Int cell, Vector2Int normal)
+        {
+            // プレイヤーが存在できるのは空セルかつ、
+            // 指定法線の反対側に支えとなる地形がある位置だけ。
+            if (HasGround(cell)) return false;
+            return HasGround(cell - ToCell(normal));
         }
 
         private bool IsSpawnCell(Vector3Int cell)
