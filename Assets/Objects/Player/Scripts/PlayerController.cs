@@ -56,7 +56,7 @@ namespace VerbGame
         private float nextMoveTime;
         // アニメーション中に再入力で状態が壊れないようにするロック。
         private bool isBusy;
-        // 効果音専用。PlayOneShot で重ねる。
+        // 効果音専用。通常SEとドリルのループ再生を兼ねる。
         private AudioSource sfxSource;
         // クリア演出中は入力も遷移も1回だけにする。
         private bool isClearingStage;
@@ -110,8 +110,12 @@ namespace VerbGame
             StartMove(nextCell, nextNormal);
         }
 
-        // コンポーネント停止時は見た目側のモーションだけ止めればよい。
-        private void OnDisable() => view?.Stop();
+        // コンポーネント停止時は見た目とループSEの両方を止める。
+        private void OnDisable()
+        {
+            view?.Stop();
+            StopLoopingSfx();
+        }
 
         private void StartMove(Vector3Int nextCell, Vector2Int nextNormal)
         {
@@ -162,7 +166,8 @@ namespace VerbGame
             List<Quaternion> drillTurnRotations = drillTurnDirections.ConvertAll(navigator.GetRotation);
 
             // 見た目は「先に回転」「次にアニメーションON」「最後に経路どおり進む」。
-            PlaySfx(drillClip);
+            // ドリル音は掘っている間ずっと鳴らしたいのでループ再生にする。
+            StartLoopingSfx(drillClip);
             view.RotateThenDrillWithTurns(
                 navigator.GetRotation(drillDirection),
                 drillRotateDuration,
@@ -175,6 +180,7 @@ namespace VerbGame
                 {
                     // 通常の壁なら出口へ抜け、
                     // 反射した場合は最終的な経路結果をそのまま確定する。
+                    StopLoopingSfx();
                     navigator.FinishDrill(endCell, endNormal);
                     FinishMovementStep();
                 });
@@ -344,11 +350,37 @@ namespace VerbGame
             sfxSource.PlayOneShot(clip);
         }
 
+        private void StartLoopingSfx(AudioClip clip)
+        {
+            if (sfxSource == null || clip == null) return;
+
+            // すでに同じドリル音をループ再生中なら、鳴らし直さずそのまま使う。
+            if (sfxSource.isPlaying && sfxSource.loop && sfxSource.clip == clip) return;
+
+            sfxSource.Stop();
+            sfxSource.clip = clip;
+            sfxSource.loop = true;
+            sfxSource.Play();
+        }
+
+        private void StopLoopingSfx()
+        {
+            if (sfxSource == null) return;
+            if (sfxSource.loop)
+            {
+                sfxSource.Stop();
+            }
+
+            sfxSource.loop = false;
+            sfxSource.clip = null;
+        }
+
         public bool RespawnToSpawn()
         {
             if (navigator == null || view == null) return false;
 
             view.Stop();
+            StopLoopingSfx();
             isBusy = false;
             isClearingStage = false;
             moveInput = 0f;
