@@ -78,7 +78,7 @@ namespace VerbGame
             // 参照不足、または何かの演出中なら新しい操作は受け付けない。
             if (isBusy || isClearingStage || grid == null || groundTilemap == null || navigator == null || view == null) return;
 
-            // 氷の壁や天井には張り付けないので、入力より先に重力落下する。
+            // 支えを失った時は、入力より先に現在の法線基準で重力落下する。
             if (TryStartSlipFall()) return;
 
             // Jump は Unity Event で立てた1回分の要求として消費する。
@@ -190,8 +190,8 @@ namespace VerbGame
 
         private bool TryStartSlipFall()
         {
-            // 氷の壁・天井に乗っている間は、
-            // 入力より先に滑落処理を優先する。
+            // 壁際の崖や、氷の壁・天井にいる時は、
+            // 入力より先に重力落下処理を優先する。
             if (navigator == null || view == null) return false;
 
             if (!navigator.TryBuildSlipFall(out List<Vector3Int> fallPath, out Vector3Int landingCell, out Vector2Int landingNormal))

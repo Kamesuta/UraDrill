@@ -108,7 +108,65 @@ namespace VerbGame
                 return true;
             }
 
-            // 2. 直進できない時は、前方の角を回り込む。
+            // 2. 前方が壁なら、現在セルに重なっているステップだけ内回りを許可する。
+            // 通常地形はここで停止する。
+            if (HasGround(straightCell))
+            {
+                if (TryTraverseCornerFromCurrentStep(tangent, out bestCell, out bestNormal))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+
+            // 3. 前方が崖なら、踏んでいるステップだけ外回りを許可する。
+            // それも無ければ、そのまま空中へ踏み出してから落下する。
+            if (TryTraverseCornerFromSupportStep(tangent, out bestCell, out bestNormal))
+            {
+                return true;
+            }
+
+            bestCell = straightCell;
+            return true;
+        }
+
+        private bool TryTraverseCornerFromCurrentStep(Vector2Int tangent, out Vector3Int bestCell, out Vector2Int bestNormal)
+        {
+            bestCell = CurrentCell;
+            bestNormal = SurfaceNormal;
+
+            // 凹面は「今いるセルに重なっているステップ」を見る。
+            WallPanelDefinition currentPanel = GetOverlayPanel(CurrentCell);
+            if (!CanTraverseStepPanel(currentPanel, tangent))
+            {
+                return false;
+            }
+
+            return TryTraverseCorner(tangent, out bestCell, out bestNormal);
+        }
+
+        private bool TryTraverseCornerFromSupportStep(Vector2Int tangent, out Vector3Int bestCell, out Vector2Int bestNormal)
+        {
+            bestCell = CurrentCell;
+            bestNormal = SurfaceNormal;
+
+            // 凸面は「今足を乗せている側の地形」に置かれたステップを見る。
+            WallPanelDefinition supportPanel = GetPanel(CurrentCell - ToCell(SurfaceNormal));
+            if (!CanTraverseStepPanel(supportPanel, tangent))
+            {
+                return false;
+            }
+
+            return TryTraverseCorner(tangent, out bestCell, out bestNormal);
+        }
+
+        private bool TryTraverseCorner(Vector2Int tangent, out Vector3Int bestCell, out Vector2Int bestNormal)
+        {
+            bestCell = CurrentCell;
+            bestNormal = SurfaceNormal;
+
+            // ステップで許可された時だけ、角を回り込む。
             // 凸角でも凹角でも、論理上は「斜め1セル + 面法線変更」で表せる。
             Vector2Int cornerNormal = tangent;
             Vector3Int cornerCell = CurrentCell + ToCell(tangent - SurfaceNormal);
@@ -119,7 +177,7 @@ namespace VerbGame
                 return true;
             }
 
-            // 3. 最後に、その場で面だけ切り替える凹角ターンを試す。
+            // 最後に、その場で面だけ切り替える凹角ターンを試す。
             // 窪みの底や天井際では、この1手で向き直してから次の直進へつなぐ。
             Vector2Int turnNormal = -tangent;
             if (IsBoundaryCell(CurrentCell, turnNormal) && HasGround(CurrentCell + ToCell(tangent)))
@@ -194,41 +252,35 @@ namespace VerbGame
             landingCell = CurrentCell;
             landingNormal = SurfaceNormal;
 
-            // 床の氷は普通に立てるが、
-            // 壁・天井の氷には張り付けないので滑落対象になる。
-            if (!ShouldSlipOnCurrentSurface()) return false;
+            // いまの面に重力で踏ん張れない時だけ、その法線に対して逆向きへ落ちる。
+            // つまり床なら下、天井なら上、右壁なら左へ落下する。
+            if (CanStayAttachedToSurface(landingCell, SurfaceNormal)) return false;
+
+            Vector2Int gravityDirection = GetGravityDirection(SurfaceNormal);
 
             while (true)
             {
-                // 落下途中で同じ向きの非氷面が現れたら、
-                // そこへ再び張り付ける。
-                if (CanAttachToNonIceSurface(landingCell, SurfaceNormal))
+                // 落下中も、同じ向きの面へ再び接地できたらそこで止まる。
+                if (CanStayAttachedToSurface(landingCell, SurfaceNormal))
                 {
                     landingNormal = SurfaceNormal;
                     return landingCell != CurrentCell;
                 }
 
-                // 真下に床があるなら、最後は床へ着地する。
-                if (HasGround(landingCell + Vector3Int.down))
-                {
-                    landingNormal = Vector2Int.up;
-                    return landingCell != CurrentCell || landingNormal != SurfaceNormal;
-                }
-
                 // まだ支えが無ければ、重力方向へ1セルぶん落とす。
-                Vector3Int nextCell = landingCell + Vector3Int.down;
+                Vector3Int nextCell = landingCell + ToCell(gravityDirection);
                 fallPath.Add(nextCell);
                 landingCell = nextCell;
 
                 // タイルマップ範囲の外へ抜けたら、それ以上は追わない。
-                if (groundTilemap != null && landingCell.y < groundTilemap.cellBounds.yMin - 1)
+                if (groundTilemap != null && IsOutsideFallBounds(landingCell, gravityDirection))
                 {
                     break;
                 }
             }
 
-            landingNormal = Vector2Int.up;
-            return landingCell != CurrentCell || landingNormal != SurfaceNormal;
+            landingNormal = SurfaceNormal;
+            return landingCell != CurrentCell;
         }
 
         public void CommitMove(Vector3Int nextCell, Vector2Int nextNormal)
@@ -258,7 +310,7 @@ namespace VerbGame
         {
             // Overlay があれば、まずそちらの特殊効果を優先する。
             TileBase tile = overlayTilemap != null ? overlayTilemap.GetTile(cell) : null;
-            tile ??= groundTilemap != null ? groundTilemap.GetTile(cell) : null;
+            tile = tile != null ? tile : groundTilemap != null ? groundTilemap.GetTile(cell) : null;
             return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
         }
 
@@ -274,26 +326,26 @@ namespace VerbGame
             return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
         }
 
-        public bool ShouldSlipOnCurrentSurface()
-        {
-            // 上向き法線は床なので滑らない。
-            if (SurfaceNormal == Vector2Int.up) return false;
-            return GetPanel(CurrentCell - ToCell(SurfaceNormal))?.CausesSlip ?? false;
-        }
-
         public bool IsTouchingCheckpoint()
         {
             // Checkpoint は Spawn と同様に「プレイヤーがいる空セル側」の Overlay へ置く前提。
             return GetPanel(CurrentCell)?.IsGoal ?? false;
         }
 
-        private bool CanAttachToNonIceSurface(Vector3Int cell, Vector2Int normal)
+        private bool CanStayAttachedToSurface(Vector3Int cell, Vector2Int normal)
         {
-            // 今向いている面の地形を見て、
-            // 氷以外ならそこへ張り直せる。
+            // 支えの地形が消えたら、その面にはもう立てない。
             Vector3Int supportCell = cell - ToCell(normal);
             if (!HasGround(supportCell)) return false;
-            return !(GetPanel(supportCell)?.CausesSlip ?? false);
+
+            // 氷だけは従来どおり、床以外に留まれない。
+            WallPanelDefinition supportPanel = GetPanel(supportCell);
+            if (supportPanel?.CausesSlip ?? false)
+            {
+                return normal == Vector2Int.up;
+            }
+
+            return true;
         }
 
         // 凸角ターンの中間点。
@@ -330,6 +382,49 @@ namespace VerbGame
         {
             return GetOverlayPanel(cell)?.IsSpawn ?? false;
         }
+
+        private bool CanTraverseStepPanel(WallPanelDefinition panel, Vector2Int moveDirection)
+        {
+            if (panel == null || !panel.AllowsStepTraversal) return false;
+
+            if (moveDirection == Vector2Int.right)
+            {
+                return panel.Direction == WallPanelDirection.RightDown ||
+                       panel.Direction == WallPanelDirection.RightUp;
+            }
+
+            if (moveDirection == Vector2Int.left)
+            {
+                return panel.Direction == WallPanelDirection.LeftUp ||
+                       panel.Direction == WallPanelDirection.LeftDown;
+            }
+
+            if (moveDirection == Vector2Int.up)
+            {
+                return panel.Direction == WallPanelDirection.RightUp ||
+                       panel.Direction == WallPanelDirection.LeftUp;
+            }
+
+            if (moveDirection == Vector2Int.down)
+            {
+                return panel.Direction == WallPanelDirection.RightDown ||
+                       panel.Direction == WallPanelDirection.LeftDown;
+            }
+
+            return false;
+        }
+
+        private bool IsOutsideFallBounds(Vector3Int cell, Vector2Int gravityDirection)
+        {
+            BoundsInt bounds = groundTilemap.cellBounds;
+            if (gravityDirection.x < 0 && cell.x < bounds.xMin - 1) return true;
+            if (gravityDirection.x > 0 && cell.x > bounds.xMax) return true;
+            if (gravityDirection.y < 0 && cell.y < bounds.yMin - 1) return true;
+            if (gravityDirection.y > 0 && cell.y > bounds.yMax) return true;
+            return false;
+        }
+
+        private Vector2Int GetGravityDirection(Vector2Int normal) => -normal;
 
         private BoundsInt GetSearchBounds()
         {

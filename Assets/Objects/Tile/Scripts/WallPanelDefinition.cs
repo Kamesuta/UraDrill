@@ -14,6 +14,7 @@ namespace VerbGame
         [SerializeField] private DrillBehavior drillBehavior = DrillBehavior.Normal;
         [SerializeField] private WallPanelDirection direction = WallPanelDirection.None;
         [SerializeField] private SlipBehavior slipBehavior = SlipBehavior.None;
+        [SerializeField] private SurfaceTraversalBehavior surfaceTraversalBehavior = SurfaceTraversalBehavior.None;
         [SerializeField] private bool isGoal;
         [SerializeField] private bool isSpawn;
 
@@ -24,9 +25,11 @@ namespace VerbGame
         public DrillBehavior DrillBehavior => drillBehavior;
         public WallPanelDirection Direction => direction;
         public SlipBehavior SlipBehavior => slipBehavior;
+        public SurfaceTraversalBehavior SurfaceTraversalBehavior => surfaceTraversalBehavior;
         public bool IsGoal => isGoal;
         public bool IsSpawn => isSpawn;
         public bool CausesSlip => slipBehavior == SlipBehavior.Slip;
+        public bool AllowsStepTraversal => surfaceTraversalBehavior == SurfaceTraversalBehavior.Step;
         public bool BouncesDrill => drillBehavior == DrillBehavior.Bounce;
         public bool BouncesBackDrill => BouncesDrill && direction == WallPanelDirection.Rect;
         public bool BouncesDrillByDirection => BouncesDrill && direction != WallPanelDirection.None && direction != WallPanelDirection.Rect;
