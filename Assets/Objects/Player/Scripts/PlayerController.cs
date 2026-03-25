@@ -14,6 +14,10 @@ namespace VerbGame
 
     public class PlayerController : MonoBehaviour
     {
+        // 見た目座標と論理セル中心がこれ以上ズレた時だけ、境界セルの再取得を許可する。
+        // 壁で止まる正常系まで再スナップすると、PlayMode で別の面へ吸われる。
+        private const float NavigatorResnapDistanceThreshold = 0.2f;
+
         // グリッド座標とワールド座標の相互変換に使う。
         [Header("Grid")]
         [SerializeField] private Grid grid;
@@ -101,7 +105,13 @@ namespace VerbGame
             if (!navigator.TryGetNextStep(moveInput > 0f ? 1 : -1, out var nextCell, out var nextNormal))
             {
                 // まれに論理セルが見た目とズレると次の1手が見つからなくなる。
-                // 現在位置から境界セルを再取得して、1回だけ探索をやり直す。
+                // ただし、壁で止まる正常系まで補正対象にすると誤って別の面へ吸われるので、
+                // いまの論理セル中心から十分ズレている時だけ再スナップする。
+                if (!IsNavigatorOutOfSync())
+                {
+                    return;
+                }
+
                 navigator.SnapToNearestBoundary(transform.position);
                 view.SnapTo(navigator.GetCellCenter(navigator.CurrentCell), navigator.GetRotation(navigator.SurfaceNormal));
                 if (!navigator.TryGetNextStep(moveInput > 0f ? 1 : -1, out nextCell, out nextNormal)) return;
@@ -109,6 +119,14 @@ namespace VerbGame
 
             nextMoveTime = Time.time + moveRepeatDelay;
             StartMove(nextCell, nextNormal);
+        }
+
+        private bool IsNavigatorOutOfSync()
+        {
+            // 現在の見た目位置と、論理上いるはずのセル中心との差を見る。
+            // ここが小さいなら「移動不能」が正しいので、再スナップしない。
+            Vector3 expectedPosition = navigator.GetCellCenter(navigator.CurrentCell);
+            return Vector3.Distance(transform.position, expectedPosition) > NavigatorResnapDistanceThreshold;
         }
 
         // コンポーネント停止時は見た目とループSEの両方を止める。
