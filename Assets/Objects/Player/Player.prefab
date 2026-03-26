@@ -116,6 +116,7 @@ MonoBehaviour:
   drillRotateDuration: 0.12
   drillStepDuration: 0.15
   slipFallStepDuration: 0.12
+  respawnBoundsMargin: 10
   drillClip: {fileID: 8300000, guid: 2b643f160ee248640a4bca38652723f0, type: 3}
   fallClip: {fileID: 8300000, guid: c218e213e8230ea418af9f33e5ece903, type: 3}
   hardWallClip: {fileID: 8300000, guid: f099844e6e32f1445aab9af4ca66e610, type: 3}
@@ -178,6 +179,22 @@ MonoBehaviour:
         m_CallState: 2
     m_ActionId: f1ba0d36-48eb-4cd5-b651-1c94a6531f70
     m_ActionName: 'Player/Jump[/Keyboard/space,/XInputControllerWindows/buttonSouth]'
+  - m_PersistentCalls:
+      m_Calls:
+      - m_Target: {fileID: 3698990979898429388}
+        m_TargetAssemblyTypeName: VerbGame.PlayerController, Assembly-CSharp
+        m_MethodName: OnReset
+        m_Mode: 0
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
+    m_ActionId: 91de07af-44ee-499e-a470-2b24e81268b8
+    m_ActionName: 'Player/Reset[/XInputControllerWindows/select,/Keyboard/r]'
   - m_PersistentCalls:
       m_Calls: []
     m_ActionId: c95b2375-e6d9-4b88-9c4c-c5e76515df4b

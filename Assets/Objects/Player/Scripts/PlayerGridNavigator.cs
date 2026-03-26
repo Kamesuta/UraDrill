@@ -273,7 +273,7 @@ namespace VerbGame
                 landingCell = nextCell;
 
                 // タイルマップ範囲の外へ抜けたら、それ以上は追わない。
-                if (groundTilemap != null && IsOutsideFallBounds(landingCell, gravityDirection))
+                if (groundTilemap != null && IsOutsideFallBounds(landingCell))
                 {
                     break;
                 }
@@ -281,6 +281,24 @@ namespace VerbGame
 
             landingNormal = SurfaceNormal;
             return landingCell != CurrentCell;
+        }
+
+        public bool IsOutsideFallBounds(Vector3Int cell, int margin = 0)
+        {
+            // Ground / Overlay を合わせたステージ Bounds から、
+            // 指定マージンぶん外へ出たかどうかを判定する。
+            BoundsInt bounds = GetSearchBounds();
+            if (bounds.size.x <= 0 || bounds.size.y <= 0)
+            {
+                return false;
+            }
+
+            int safeMargin = Mathf.Max(0, margin);
+            int minX = bounds.xMin - safeMargin;
+            int maxX = bounds.xMax - 1 + safeMargin;
+            int minY = bounds.yMin - safeMargin;
+            int maxY = bounds.yMax - 1 + safeMargin;
+            return cell.x <= minX || cell.x >= maxX || cell.y <= minY || cell.y >= maxY;
         }
 
         public void CommitMove(Vector3Int nextCell, Vector2Int nextNormal)
@@ -411,16 +429,6 @@ namespace VerbGame
                        panel.Direction == WallPanelDirection.LeftDown;
             }
 
-            return false;
-        }
-
-        private bool IsOutsideFallBounds(Vector3Int cell, Vector2Int gravityDirection)
-        {
-            BoundsInt bounds = groundTilemap.cellBounds;
-            if (gravityDirection.x < 0 && cell.x < bounds.xMin - 1) return true;
-            if (gravityDirection.x > 0 && cell.x > bounds.xMax) return true;
-            if (gravityDirection.y < 0 && cell.y < bounds.yMin - 1) return true;
-            if (gravityDirection.y > 0 && cell.y > bounds.yMax) return true;
             return false;
         }
 

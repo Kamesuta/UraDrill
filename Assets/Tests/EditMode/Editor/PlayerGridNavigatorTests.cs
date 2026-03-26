@@ -55,6 +55,59 @@ namespace VerbGame.Tests
             }
         }
 
+        [Test]
+        public void IsOutsideFallBounds_BecomesTrueFromTenCellsBelowBound()
+        {
+            WallPanelCatalog tileCatalog = AssetDatabase.LoadAssetAtPath<WallPanelCatalog>(TileCatalogPath);
+            Assert.That(tileCatalog, Is.Not.Null, $"タイルカタログが見つかりません: {TileCatalogPath}");
+
+            using var context = new TestContext(tileCatalog);
+
+            bool imported = LevelEditModeCsvUtility.TryImportCsv(
+                context.GroundTilemap,
+                context.OverlayTilemap,
+                tileCatalog,
+                @"
+                    0,0,1,1
+                    1
+                ".Trim(),
+                out int importedCount,
+                out string errorMessage);
+
+            Assert.That(imported, Is.True, $"CSV 読み込み失敗: {errorMessage}");
+            Assert.That(importedCount, Is.GreaterThan(0), "テストステージにタイルがありません");
+
+            Assert.That(context.Navigator.IsOutsideFallBounds(new Vector3Int(0, -9, 0), 10), Is.False, "Bound の 9 マス下ではまだリスポーンしない想定です");
+            Assert.That(context.Navigator.IsOutsideFallBounds(new Vector3Int(0, -10, 0), 10), Is.True, "Bound の 10 マス下に出た時点でリスポーンしたいです");
+        }
+
+        [Test]
+        public void IsOutsideFallBounds_UsesCombinedGroundAndOverlayBounds()
+        {
+            WallPanelCatalog tileCatalog = AssetDatabase.LoadAssetAtPath<WallPanelCatalog>(TileCatalogPath);
+            Assert.That(tileCatalog, Is.Not.Null, $"タイルカタログが見つかりません: {TileCatalogPath}");
+
+            using var context = new TestContext(tileCatalog);
+
+            bool imported = LevelEditModeCsvUtility.TryImportCsv(
+                context.GroundTilemap,
+                context.OverlayTilemap,
+                tileCatalog,
+                @"
+                    0,0,2,1
+                    1,z
+                ".Trim(),
+                out int importedCount,
+                out string errorMessage);
+
+            Assert.That(imported, Is.True, $"CSV 読み込み失敗: {errorMessage}");
+            Assert.That(importedCount, Is.GreaterThan(0), "テストステージにタイルがありません");
+
+            // Overlay 上の Spawn もステージ Bounds に含めて、右側の許容量を決める。
+            Assert.That(context.Navigator.IsOutsideFallBounds(new Vector3Int(10, 0, 0), 10), Is.False, "Overlay を含む Bound から 9 マス右はまだ許容する想定です");
+            Assert.That(context.Navigator.IsOutsideFallBounds(new Vector3Int(11, 0, 0), 10), Is.True, "Overlay を含む Bound から 10 マス右でリスポーンしたいです");
+        }
+
         private static bool ApplyInput(PlayerGridNavigator navigator, StepKey input)
         {
             int direction = input switch

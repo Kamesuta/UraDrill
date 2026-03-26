@@ -38,6 +38,10 @@ namespace VerbGame
         // 氷で滑った時の落下1セルぶん移動時間。
         [SerializeField] private float slipFallStepDuration = 0.12f;
 
+        [Header("Respawn")]
+        // Stage Bounds からこのマス数以上外へ落ちたら Spawn へ戻す。
+        [SerializeField] private int respawnBoundsMargin = 10;
+
         [Header("Audio")]
         [SerializeField] private AudioClip drillClip;
         [SerializeField] private AudioClip fallClip;
@@ -227,6 +231,12 @@ namespace VerbGame
                 {
                     // 落下が終わった位置と張り付き先を論理状態へ反映する。
                     navigator.CommitMove(landingCell, landingNormal);
+                    if (navigator.IsOutsideFallBounds(landingCell, respawnBoundsMargin))
+                    {
+                        RespawnToSpawn();
+                        return;
+                    }
+
                     if (!TryHandleStageClear())
                     {
                         isBusy = false;
@@ -443,6 +453,17 @@ namespace VerbGame
             {
                 drillPressed = true;
             }
+        }
+
+        public void OnReset(InputAction.CallbackContext context)
+        {
+            // Reset は押された瞬間に、進行中の演出を止めて Spawn へ戻す。
+            if (!context.performed)
+            {
+                return;
+            }
+
+            RespawnToSpawn();
         }
     }
 }
