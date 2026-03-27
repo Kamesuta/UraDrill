@@ -22,9 +22,7 @@ namespace VerbGame.Tests
             using var context = new TestContext(tileCatalog);
 
             bool imported = LevelEditModeCsvUtility.TryImportCsv(
-                context.GroundTilemap,
-                context.OverlayTilemap,
-                tileCatalog,
+                context.Stage,
                 scenario.StageCsv,
                 out int importedCount,
                 out string errorMessage);
@@ -64,9 +62,7 @@ namespace VerbGame.Tests
             using var context = new TestContext(tileCatalog);
 
             bool imported = LevelEditModeCsvUtility.TryImportCsv(
-                context.GroundTilemap,
-                context.OverlayTilemap,
-                tileCatalog,
+                context.Stage,
                 @"
                     0,0,1,1
                     1
@@ -90,9 +86,7 @@ namespace VerbGame.Tests
             using var context = new TestContext(tileCatalog);
 
             bool imported = LevelEditModeCsvUtility.TryImportCsv(
-                context.GroundTilemap,
-                context.OverlayTilemap,
-                tileCatalog,
+                context.Stage,
                 @"
                     0,0,2,1
                     1,z
@@ -260,6 +254,7 @@ namespace VerbGame.Tests
 
         private sealed class TestContext : System.IDisposable
         {
+            public Stage Stage { get; }
             public Tilemap GroundTilemap { get; }
             public Tilemap OverlayTilemap { get; }
             public PlayerGridNavigator Navigator { get; }
@@ -271,10 +266,19 @@ namespace VerbGame.Tests
                 // 実シーンと同じく Grid 配下に Ground / Overlay の Tilemap を持つ。
                 rootObject = new GameObject("PlayerGridNavigatorTests_Root");
                 Grid grid = rootObject.AddComponent<Grid>();
+                Stage = rootObject.AddComponent<Stage>();
 
                 GroundTilemap = CreateTilemapChild("Ground");
                 OverlayTilemap = CreateTilemapChild("Overlay");
-                Navigator = new PlayerGridNavigator(grid, GroundTilemap, OverlayTilemap, tileCatalog);
+
+                SerializedObject serializedStage = new(Stage);
+                serializedStage.FindProperty("grid").objectReferenceValue = grid;
+                serializedStage.FindProperty("groundTilemap").objectReferenceValue = GroundTilemap;
+                serializedStage.FindProperty("overlayTilemap").objectReferenceValue = OverlayTilemap;
+                serializedStage.FindProperty("wallPanelCatalog").objectReferenceValue = tileCatalog;
+                serializedStage.ApplyModifiedPropertiesWithoutUndo();
+
+                Navigator = new PlayerGridNavigator(Stage);
             }
 
             public void Dispose()

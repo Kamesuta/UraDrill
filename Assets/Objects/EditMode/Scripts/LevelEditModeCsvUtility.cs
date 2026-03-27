@@ -8,14 +8,15 @@ namespace VerbGame
     // Ground Tilemap の CSV 入出力だけを担当する。
     public static class LevelEditModeCsvUtility
     {
+        // Stage 全体を 1 セットとして受け取り、CSV を組み立てる。
         // Ground / Overlay を 1 セル 1 トークンの CSV に変換して返す。
-        public static bool TryBuildCsv(Tilemap groundTilemap, Tilemap overlayTilemap, WallPanelCatalog tileCatalog, out string csv, out BoundsInt bounds, out string errorMessage)
+        public static bool TryBuildCsv(Stage stage, out string csv, out BoundsInt bounds, out string errorMessage)
         {
             csv = string.Empty;
             bounds = default;
             errorMessage = string.Empty;
 
-            if (groundTilemap == null || overlayTilemap == null || tileCatalog == null)
+            if (!TryGetStageReferences(stage, out Tilemap groundTilemap, out Tilemap overlayTilemap, out WallPanelCatalog tileCatalog))
             {
                 errorMessage = "エクスポートに失敗しました";
                 return false;
@@ -68,13 +69,14 @@ namespace VerbGame
             return true;
         }
 
+        // Stage 全体を 1 セットとして受け取り、クリップボードなどの CSV を復元する。
         // クリップボードなどから受け取った CSV を Ground / Overlay へ復元する。
-        public static bool TryImportCsv(Tilemap groundTilemap, Tilemap overlayTilemap, WallPanelCatalog tileCatalog, string csv, out int importedCount, out string errorMessage)
+        public static bool TryImportCsv(Stage stage, string csv, out int importedCount, out string errorMessage)
         {
             importedCount = 0;
             errorMessage = string.Empty;
 
-            if (groundTilemap == null || overlayTilemap == null || tileCatalog == null)
+            if (!TryGetStageReferences(stage, out Tilemap groundTilemap, out Tilemap overlayTilemap, out WallPanelCatalog tileCatalog))
             {
                 errorMessage = "インポートに失敗しました";
                 return false;
@@ -157,6 +159,14 @@ namespace VerbGame
             groundTilemap.CompressBounds();
             overlayTilemap.CompressBounds();
             return true;
+        }
+
+        private static bool TryGetStageReferences(Stage stage, out Tilemap groundTilemap, out Tilemap overlayTilemap, out WallPanelCatalog tileCatalog)
+        {
+            groundTilemap = stage != null ? stage.GroundTilemap : null;
+            overlayTilemap = stage != null ? stage.OverlayTilemap : null;
+            tileCatalog = stage != null ? stage.WallPanelCatalog : null;
+            return groundTilemap != null && overlayTilemap != null && tileCatalog != null;
         }
 
         // CSV 1 行を単純なカンマ区切りで分解する。

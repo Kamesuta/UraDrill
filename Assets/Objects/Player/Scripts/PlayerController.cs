@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
-using UnityEngine.Tilemaps;
 
 namespace VerbGame
 {
@@ -17,14 +16,6 @@ namespace VerbGame
         // 見た目座標と論理セル中心がこれ以上ズレた時だけ、境界セルの再取得を許可する。
         // 壁で止まる正常系まで再スナップすると、PlayMode で別の面へ吸われる。
         private const float NavigatorResnapDistanceThreshold = 0.2f;
-
-        // グリッド座標とワールド座標の相互変換に使う。
-        [Header("Grid")]
-        [SerializeField] private Grid grid;
-        // 地形タイルの有無だけを見たいので Tilemap を直接参照する。
-        [SerializeField] private Tilemap groundTilemap;
-        [SerializeField] private Tilemap overlayTilemap;
-        [SerializeField] private WallPanelCatalog wallPanelCatalog;
 
         // 通常の1ステップ移動時間。
         [Header("Timing")]
@@ -74,10 +65,17 @@ namespace VerbGame
         // クリア演出中は入力も遷移も1回だけにする。
         private bool isClearingStage;
 
+        // Stage 探索は Stage 側へ隠し、呼び出し側は共通窓口だけ見る。
+        private Stage CurrentStage => Stage.Instance;
+
         private void Awake()
         {
             // ロジック担当と見た目担当をここで組み立てる。
-            navigator = new PlayerGridNavigator(grid, groundTilemap, overlayTilemap, wallPanelCatalog);
+            if (CurrentStage != null)
+            {
+                navigator = new PlayerGridNavigator(CurrentStage);
+            }
+
             view = new PlayerView(transform, GetComponentInChildren<Animator>());
             EnsureAudioSource();
             EnsureClearObject();
@@ -85,18 +83,13 @@ namespace VerbGame
 
         private void Start()
         {
-            // シーン読み込み直後は Tilemap.cellBounds が過去編集分で広がっていることがある。
-            // 初回リスポーンや落下判定が古い Bounds を見ないよう、開始時に圧縮して揃える。
-            groundTilemap?.CompressBounds();
-            overlayTilemap?.CompressBounds();
-
             RespawnToSpawn();
         }
 
         private void Update()
         {
             // 参照不足、または何かの演出中なら新しい操作は受け付けない。
-            if (isBusy || isClearingStage || grid == null || groundTilemap == null || navigator == null || view == null) return;
+            if (isBusy || isClearingStage || CurrentStage == null || CurrentStage.Grid == null || CurrentStage.GroundTilemap == null || navigator == null || view == null) return;
 
             UpdateRuntimeInputState();
 

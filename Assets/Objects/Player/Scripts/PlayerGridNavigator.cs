@@ -11,33 +11,24 @@ namespace VerbGame
     {
         // 地形面の候補になる4方向。
         private static readonly Vector2Int[] Cardinals = { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left };
-        // 座標変換用。
-        private readonly Grid grid;
-        // 地形が存在するかどうかを判定する相手。
-        private readonly Tilemap groundTilemap;
-        // Ground に重ねる特殊タイル用レイヤー。
-        private readonly Tilemap overlayTilemap;
-        // 地形タイルと特殊パネル定義の対応表。
-        private readonly WallPanelCatalog wallPanelCatalog;
+        // 参照は個別ではなく Stage へ寄せる。
+        private readonly Stage stage;
 
         // プレイヤーが今いる空セル。
         public Vector3Int CurrentCell { get; private set; }
         // 今張り付いている地形面の法線。
         public Vector2Int SurfaceNormal { get; private set; } = Vector2Int.up;
 
-        public PlayerGridNavigator(Grid grid, Tilemap groundTilemap, Tilemap overlayTilemap, WallPanelCatalog wallPanelCatalog)
+        public PlayerGridNavigator(Stage stage)
         {
-            this.grid = grid;
-            this.groundTilemap = groundTilemap;
-            this.overlayTilemap = overlayTilemap;
-            this.wallPanelCatalog = wallPanelCatalog;
+            this.stage = stage;
         }
 
         public void SnapToNearestBoundary(Vector3 worldPosition)
         {
             // 起動時は適当なワールド座標から始まるので、
             // 周囲3x3の中から一番近い境界セルを探して現在地にする。
-            Vector3Int origin = grid.WorldToCell(worldPosition);
+            Vector3Int origin = stage.Grid.WorldToCell(worldPosition);
             float bestDistance = float.PositiveInfinity;
 
             for (int y = -1; y <= 1; y++)
@@ -65,7 +56,7 @@ namespace VerbGame
         {
             spawnCell = default;
             spawnNormal = Vector2Int.up;
-            if (groundTilemap == null) return false;
+            if (stage.GroundTilemap == null) return false;
 
             BoundsInt bounds = GetSearchBounds();
             Vector2Int[] searchOrder = { Vector2Int.up, Vector2Int.right, Vector2Int.left, Vector2Int.down };
@@ -273,7 +264,7 @@ namespace VerbGame
                 landingCell = nextCell;
 
                 // タイルマップ範囲の外へ抜けたら、それ以上は追わない。
-                if (groundTilemap != null && IsOutsideFallBounds(landingCell))
+                if (stage.GroundTilemap != null && IsOutsideFallBounds(landingCell))
                 {
                     break;
                 }
@@ -327,21 +318,21 @@ namespace VerbGame
         public WallPanelDefinition GetPanel(Vector3Int cell)
         {
             // Overlay があれば、まずそちらの特殊効果を優先する。
-            TileBase tile = overlayTilemap != null ? overlayTilemap.GetTile(cell) : null;
-            tile = tile != null ? tile : groundTilemap != null ? groundTilemap.GetTile(cell) : null;
-            return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
+            TileBase tile = stage.OverlayTilemap != null ? stage.OverlayTilemap.GetTile(cell) : null;
+            tile = tile != null ? tile : stage.GroundTilemap != null ? stage.GroundTilemap.GetTile(cell) : null;
+            return stage.WallPanelCatalog != null ? stage.WallPanelCatalog.GetPanel(tile) : null;
         }
 
         private WallPanelDefinition GetGroundPanel(Vector3Int cell)
         {
-            TileBase tile = groundTilemap != null ? groundTilemap.GetTile(cell) : null;
-            return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
+            TileBase tile = stage.GroundTilemap != null ? stage.GroundTilemap.GetTile(cell) : null;
+            return stage.WallPanelCatalog != null ? stage.WallPanelCatalog.GetPanel(tile) : null;
         }
 
         private WallPanelDefinition GetOverlayPanel(Vector3Int cell)
         {
-            TileBase tile = overlayTilemap != null ? overlayTilemap.GetTile(cell) : null;
-            return wallPanelCatalog != null ? wallPanelCatalog.GetPanel(tile) : null;
+            TileBase tile = stage.OverlayTilemap != null ? stage.OverlayTilemap.GetTile(cell) : null;
+            return stage.WallPanelCatalog != null ? stage.WallPanelCatalog.GetPanel(tile) : null;
         }
 
         public bool IsTouchingCheckpoint()
@@ -370,7 +361,7 @@ namespace VerbGame
         // 現在の面法線方向へ少し回り込んでから、次セルへ入る。
         public Vector3Int GetConvexCornerWaypoint(Vector3Int nextCell) => CurrentCell + (nextCell - CurrentCell) + ToCell(SurfaceNormal);
         // セル中心ワールド座標を返す。
-        public Vector3 GetCellCenter(Vector3Int cell) => grid.GetCellCenterWorld(cell);
+        public Vector3 GetCellCenter(Vector3Int cell) => stage.Grid.GetCellCenterWorld(cell);
         // 4方向法線を、見た目用の Z 回転へ変換する。
         public Quaternion GetRotation(Vector2Int normal) => Quaternion.Euler(0f, 0f, -Mathf.Atan2(normal.x, normal.y) * Mathf.Rad2Deg);
 
@@ -381,9 +372,9 @@ namespace VerbGame
         // そのセルに地形タイルがあるかどうかだけを見る。
         private bool HasGround(Vector3Int cell)
         {
-            if (groundTilemap == null) return false;
+            if (stage.GroundTilemap == null) return false;
 
-            TileBase tile = groundTilemap.GetTile(cell);
+            TileBase tile = stage.GroundTilemap.GetTile(cell);
             if (tile == null) return false;
             return !IsSpawnCell(cell);
         }
@@ -436,10 +427,10 @@ namespace VerbGame
 
         private BoundsInt GetSearchBounds()
         {
-            BoundsInt groundBounds = groundTilemap != null ? groundTilemap.cellBounds : default;
-            BoundsInt overlayBounds = overlayTilemap != null ? overlayTilemap.cellBounds : default;
+            BoundsInt groundBounds = stage.GroundTilemap != null ? stage.GroundTilemap.cellBounds : default;
+            BoundsInt overlayBounds = stage.OverlayTilemap != null ? stage.OverlayTilemap.cellBounds : default;
 
-            if (overlayTilemap == null)
+            if (stage.OverlayTilemap == null)
             {
                 return groundBounds;
             }
