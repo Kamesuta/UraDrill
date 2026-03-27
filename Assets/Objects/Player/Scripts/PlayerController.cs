@@ -57,10 +57,14 @@ namespace VerbGame
         private PlayerGridNavigator navigator;
         // LitMotion と Animator をまとめた見た目担当。
         private PlayerView view;
+        // キーボードやゲームパッドなど、非タッチ入力から来る左右入力。
+        private float actionMoveInput;
         // 左右入力。最後に -1〜1 に正規化する。
         private float moveInput;
         // ドリル入力は押したフレームだけ有効。
         private bool drillPressed;
+        // 両側同時タッチ中かどうかを保持し、掘る入力を1回だけ発火させる。
+        private bool wasDualTouchActive;
         // 押しっぱなし移動の次回解禁時刻。
         private float nextMoveTime;
         // アニメーション中に再入力で状態が壊れないようにするロック。
@@ -93,6 +97,8 @@ namespace VerbGame
         {
             // 参照不足、または何かの演出中なら新しい操作は受け付けない。
             if (isBusy || isClearingStage || grid == null || groundTilemap == null || navigator == null || view == null) return;
+
+            UpdateRuntimeInputState();
 
             // 支えを失った時は、入力より先に現在の法線基準で重力落下する。
             if (TryStartSlipFall()) return;
@@ -131,6 +137,60 @@ namespace VerbGame
 
             nextMoveTime = Time.time + moveRepeatDelay;
             StartMove(nextCell, nextNormal);
+        }
+
+        private void UpdateRuntimeInputState()
+        {
+            // まずは通常入力をそのまま採用し、
+            // タッチが存在する時だけモバイル向けの入力で上書きする。
+            moveInput = actionMoveInput;
+
+            if (!TryGetTouchControlState(out PlayerTouchInputResolver.Result touchResult))
+            {
+                wasDualTouchActive = false;
+                return;
+            }
+
+            moveInput = touchResult.MoveInput;
+            if (touchResult.ShouldTriggerDrill)
+            {
+                drillPressed = true;
+            }
+
+            wasDualTouchActive = touchResult.IsDualTouchActive;
+        }
+
+        private bool TryGetTouchControlState(out PlayerTouchInputResolver.Result result)
+        {
+            result = default;
+            Touchscreen touchscreen = Touchscreen.current;
+            if (touchscreen == null)
+            {
+                return false;
+            }
+
+            float screenWidth = Mathf.Max(1f, Screen.width);
+            List<float> activeTouchPositions = new();
+
+            // 画面に触れている指だけを集めて、
+            // 左右どちらを押し続けているかを純粋ロジックへ渡す。
+            foreach (var touch in touchscreen.touches)
+            {
+                if (!touch.press.isPressed)
+                {
+                    continue;
+                }
+
+                activeTouchPositions.Add(touch.position.ReadValue().x);
+            }
+
+            if (activeTouchPositions.Count == 0)
+            {
+                return false;
+            }
+
+            result = PlayerTouchInputResolver.Resolve(activeTouchPositions, screenWidth, wasDualTouchActive);
+            return true;
         }
 
         private bool IsNavigatorOutOfSync()
@@ -420,8 +480,10 @@ namespace VerbGame
             StopLoopingSfx();
             isBusy = false;
             isClearingStage = false;
+            actionMoveInput = 0f;
             moveInput = 0f;
             drillPressed = false;
+            wasDualTouchActive = false;
             nextMoveTime = 0f;
             SetClearVisible(false);
 
@@ -446,11 +508,11 @@ namespace VerbGame
             // 横成分だけを移動入力として保持する。
             if (context.performed)
             {
-                moveInput = Mathf.Clamp(context.ReadValue<Vector2>().x, -1f, 1f);
+                actionMoveInput = Mathf.Clamp(context.ReadValue<Vector2>().x, -1f, 1f);
             }
             else if (context.canceled)
             {
-                moveInput = 0f;
+                actionMoveInput = 0f;
             }
         }
 
