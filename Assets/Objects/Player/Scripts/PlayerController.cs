@@ -77,6 +77,14 @@ namespace VerbGame
             view = new PlayerView(transform, GetComponentInChildren<Animator>());
             EnsureAudioSource();
             EnsureClearObject();
+        }
+
+        private void Start()
+        {
+            // シーン読み込み直後は Tilemap.cellBounds が過去編集分で広がっていることがある。
+            // 初回リスポーンや落下判定が古い Bounds を見ないよう、開始時に圧縮して揃える。
+            groundTilemap?.CompressBounds();
+            overlayTilemap?.CompressBounds();
 
             RespawnToSpawn();
         }
