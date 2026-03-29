@@ -54,8 +54,9 @@ namespace VerbGame
         private float moveInput;
         // ドリル入力は押したフレームだけ有効。
         private bool drillPressed;
-        // 両側同時タッチ中かどうかを保持し、掘る入力を1回だけ発火させる。
-        private bool wasDualTouchActive;
+        // 中央の掘るゾーンを押し続けているかどうかを保持し、
+        // 掘る入力を立ち上がりの1回だけ発火させる。
+        private bool wasDrillTouchActive;
         // 押しっぱなし移動の次回解禁時刻。
         private float nextMoveTime;
         // アニメーション中に再入力で状態が壊れないようにするロック。
@@ -140,7 +141,7 @@ namespace VerbGame
 
             if (!TryGetTouchControlState(out PlayerTouchInputResolver.Result touchResult))
             {
-                wasDualTouchActive = false;
+                wasDrillTouchActive = false;
                 return;
             }
 
@@ -150,7 +151,7 @@ namespace VerbGame
                 drillPressed = true;
             }
 
-            wasDualTouchActive = touchResult.IsDualTouchActive;
+            wasDrillTouchActive = touchResult.IsDrillTouchActive;
         }
 
         private bool TryGetTouchControlState(out PlayerTouchInputResolver.Result result)
@@ -182,7 +183,7 @@ namespace VerbGame
                 return false;
             }
 
-            result = PlayerTouchInputResolver.Resolve(activeTouchPositions, screenWidth, wasDualTouchActive);
+            result = PlayerTouchInputResolver.Resolve(activeTouchPositions, screenWidth, wasDrillTouchActive);
             return true;
         }
 
@@ -476,7 +477,7 @@ namespace VerbGame
             actionMoveInput = 0f;
             moveInput = 0f;
             drillPressed = false;
-            wasDualTouchActive = false;
+            wasDrillTouchActive = false;
             nextMoveTime = 0f;
             SetClearVisible(false);
 

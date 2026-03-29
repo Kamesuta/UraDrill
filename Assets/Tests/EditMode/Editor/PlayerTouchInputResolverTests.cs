@@ -2,73 +2,86 @@ using NUnit.Framework;
 
 namespace VerbGame.Tests
 {
-    // スマホ向けの左右タッチ判定が崩れないように、
-    // 左右押しっぱなしと両側同時タップの規則を固定する。
+    // スマホ向けの 3 分割タッチ判定が崩れないように、
+    // 左移動・中央で掘る・右移動の規則を固定する。
     public sealed class PlayerTouchInputResolverTests
     {
         [Test]
-        public void Resolve_LeftHalfHold_MovesLeft()
+        public void Resolve_LeftThirdHold_MovesLeft()
         {
             PlayerTouchInputResolver.Result result = PlayerTouchInputResolver.Resolve(
                 new[] { 100f },
                 1000f,
-                wasDualTouchActive: false);
+                wasDrillTouchActive: false);
 
             Assert.That(result.MoveInput, Is.EqualTo(-1f));
             Assert.That(result.ShouldTriggerDrill, Is.False);
-            Assert.That(result.IsDualTouchActive, Is.False);
+            Assert.That(result.IsDrillTouchActive, Is.False);
         }
 
         [Test]
-        public void Resolve_RightHalfHold_MovesRight()
+        public void Resolve_RightThirdHold_MovesRight()
         {
             PlayerTouchInputResolver.Result result = PlayerTouchInputResolver.Resolve(
                 new[] { 900f },
                 1000f,
-                wasDualTouchActive: false);
+                wasDrillTouchActive: false);
 
             Assert.That(result.MoveInput, Is.EqualTo(1f));
             Assert.That(result.ShouldTriggerDrill, Is.False);
-            Assert.That(result.IsDualTouchActive, Is.False);
+            Assert.That(result.IsDrillTouchActive, Is.False);
         }
 
         [Test]
-        public void Resolve_DualTouchRise_TriggersDrillOnce()
+        public void Resolve_MiddleThirdTap_TriggersDrillOnce()
         {
             PlayerTouchInputResolver.Result result = PlayerTouchInputResolver.Resolve(
-                new[] { 100f, 900f },
+                new[] { 500f },
                 1000f,
-                wasDualTouchActive: false);
+                wasDrillTouchActive: false);
 
             Assert.That(result.MoveInput, Is.EqualTo(0f));
             Assert.That(result.ShouldTriggerDrill, Is.True);
-            Assert.That(result.IsDualTouchActive, Is.True);
+            Assert.That(result.IsDrillTouchActive, Is.True);
         }
 
         [Test]
-        public void Resolve_DualTouchHold_DoesNotRepeatDrill()
+        public void Resolve_MiddleThirdHold_DoesNotRepeatDrill()
         {
             PlayerTouchInputResolver.Result result = PlayerTouchInputResolver.Resolve(
-                new[] { 100f, 900f },
+                new[] { 500f },
                 1000f,
-                wasDualTouchActive: true);
+                wasDrillTouchActive: true);
 
             Assert.That(result.MoveInput, Is.EqualTo(0f));
             Assert.That(result.ShouldTriggerDrill, Is.False);
-            Assert.That(result.IsDualTouchActive, Is.True);
+            Assert.That(result.IsDrillTouchActive, Is.True);
         }
 
         [Test]
-        public void Resolve_AfterDualTouchReleaseToLeft_ResumesLeftMove()
+        public void Resolve_AfterMiddleTouchReleaseToLeft_ResumesLeftMove()
         {
             PlayerTouchInputResolver.Result result = PlayerTouchInputResolver.Resolve(
                 new[] { 100f },
                 1000f,
-                wasDualTouchActive: true);
+                wasDrillTouchActive: true);
 
             Assert.That(result.MoveInput, Is.EqualTo(-1f));
             Assert.That(result.ShouldTriggerDrill, Is.False);
-            Assert.That(result.IsDualTouchActive, Is.False);
+            Assert.That(result.IsDrillTouchActive, Is.False);
+        }
+
+        [Test]
+        public void Resolve_LeftAndMiddleTouch_PrioritizesDrill()
+        {
+            PlayerTouchInputResolver.Result result = PlayerTouchInputResolver.Resolve(
+                new[] { 100f, 500f },
+                1000f,
+                wasDrillTouchActive: false);
+
+            Assert.That(result.MoveInput, Is.EqualTo(0f));
+            Assert.That(result.ShouldTriggerDrill, Is.True);
+            Assert.That(result.IsDrillTouchActive, Is.True);
         }
     }
 }
