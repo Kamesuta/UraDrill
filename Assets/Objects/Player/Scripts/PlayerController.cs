@@ -50,6 +50,9 @@ namespace VerbGame
         private PlayerView view;
         // キーボードやゲームパッドなど、非タッチ入力から来る左右入力。
         private float actionMoveInput;
+        // いま押している左右入力に対する反転状態。
+        // 押し始めの面向きで固定し、離すまで維持する。
+        private PlayerInputOrientationLockUtility.State inputOrientationState = new(false, 1f);
         // 左右入力。最後に -1〜1 に正規化する。
         private float moveInput;
         // ドリル入力は押したフレームだけ有効。
@@ -137,21 +140,33 @@ namespace VerbGame
         {
             // まずは通常入力をそのまま採用し、
             // タッチが存在する時だけモバイル向けの入力で上書きする。
-            moveInput = actionMoveInput;
+            float rawMoveInput = actionMoveInput;
 
             if (!TryGetTouchControlState(out PlayerTouchInputResolver.Result touchResult))
             {
                 wasDrillTouchActive = false;
-                return;
             }
-
-            moveInput = touchResult.MoveInput;
-            if (touchResult.ShouldTriggerDrill)
+            else
             {
-                drillPressed = true;
+                rawMoveInput = touchResult.MoveInput;
+                if (touchResult.ShouldTriggerDrill)
+                {
+                    drillPressed = true;
+                }
+
+                wasDrillTouchActive = touchResult.IsDrillTouchActive;
             }
 
-            wasDrillTouchActive = touchResult.IsDrillTouchActive;
+            UpdateInputOrientationLock(rawMoveInput);
+            moveInput = rawMoveInput * inputOrientationState.OrientationMultiplier;
+        }
+
+        private void UpdateInputOrientationLock(float rawMoveInput)
+        {
+            // ニュートラルから押された瞬間だけ、
+            // その時点の面向きで左右反転を固定する。
+            // 押しっぱなし中は面が変わっても更新しない。
+            inputOrientationState = PlayerInputOrientationLockUtility.Update(inputOrientationState, rawMoveInput, navigator.SurfaceNormal);
         }
 
         private bool TryGetTouchControlState(out PlayerTouchInputResolver.Result result)
@@ -475,6 +490,7 @@ namespace VerbGame
             isBusy = false;
             isClearingStage = false;
             actionMoveInput = 0f;
+            inputOrientationState = new PlayerInputOrientationLockUtility.State(false, 1f);
             moveInput = 0f;
             drillPressed = false;
             wasDrillTouchActive = false;
