@@ -333,15 +333,53 @@ namespace VerbGame
                 return;
             }
 
-            GUIUtility.systemCopyBuffer = csv;
-            SetMessage($"CSVをコピーしました: {bounds.size.x}x{bounds.size.y}");
+            // WebGL 実機では systemCopyBuffer だけだと unityroom 上で失敗しやすいため、
+            // 実行環境に応じたコピー窓口へ寄せる。
+            if (!LevelEditModeClipboardBridge.TryCopyText(csv, (success, copyError) => HandleClipboardCopyResult(success, copyError, bounds)))
+            {
+                SetMessage("CSV のコピーに失敗しました");
+                return;
+            }
+
+            // WebGL 実機ではコピー完了が非同期になるため、待機メッセージを出しておく。
+            if (LevelEditModeClipboardBridge.UsesAsyncClipboard)
+            {
+                SetMessage("CSVをコピー中です");
+            }
         }
 
         // クリップボードの CSV を読んで Ground タイルを復元する。
         private void ImportFromClipboard()
         {
-            string csv = GUIUtility.systemCopyBuffer;
-            if (!LevelEditModeCsvUtility.TryImportCsv(CurrentStage, csv, out int importedCount, out string errorMessage))
+            // WebGL 実機では貼り付けが非同期になるため、結果はコールバックで受け取る。
+            if (!LevelEditModeClipboardBridge.TryPasteText(HandleClipboardPasteResult))
+            {
+                SetMessage("CSV の貼り付け開始に失敗しました");
+                return;
+            }
+
+            // WebGL 実機ではこの直後にまだ結果が返らないため、待機メッセージを出しておく。
+            if (LevelEditModeClipboardBridge.UsesAsyncClipboard)
+            {
+                SetMessage("クリップボードを読み込み中です");
+            }
+        }
+
+        // クリップボードから受け取った文字列を CSV として復元する。
+        private void HandleClipboardPasteResult(bool success, string csv, string errorMessage)
+        {
+            if (this == null)
+            {
+                return;
+            }
+
+            if (!success)
+            {
+                SetMessage(string.IsNullOrWhiteSpace(errorMessage) ? "CSV の貼り付けに失敗しました" : errorMessage);
+                return;
+            }
+
+            if (!LevelEditModeCsvUtility.TryImportCsv(CurrentStage, csv, out int importedCount, out errorMessage))
             {
                 SetMessage(errorMessage);
                 return;
@@ -349,6 +387,23 @@ namespace VerbGame
 
             RefreshSpawnTileVisibility();
             SetMessage($"CSVを読み込みました: {importedCount} タイル");
+        }
+
+        // クリップボードへのコピー完了結果を受けてメッセージ表示を確定する。
+        private void HandleClipboardCopyResult(bool success, string errorMessage, BoundsInt bounds)
+        {
+            if (this == null)
+            {
+                return;
+            }
+
+            if (!success)
+            {
+                SetMessage(string.IsNullOrWhiteSpace(errorMessage) ? "CSV のコピーに失敗しました" : errorMessage);
+                return;
+            }
+
+            SetMessage($"CSVをコピーしました: {bounds.size.x}x{bounds.size.y}");
         }
 
         // いま置かれている Spawn タイル位置へプレイヤーを戻す。
