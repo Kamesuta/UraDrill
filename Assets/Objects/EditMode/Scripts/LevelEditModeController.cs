@@ -11,6 +11,20 @@ namespace VerbGame
     // UI の開閉、入力の振り分け、タイル適用、Spawn 表示制御を担当する。
     public sealed class LevelEditModeController : MonoBehaviour
     {
+        // 編集入力の主モード。
+        private enum EditInteractionMode
+        {
+            Place,
+            Camera,
+        }
+
+        // 右クリック破壊時の対象レイヤー。
+        private enum DestroyLayerMode
+        {
+            SelectedOnly,
+            AllLayers,
+        }
+
         [Header("シーン参照")]
         [SerializeField] private Camera worldCamera;
         [SerializeField] private CameraController cameraController;
@@ -22,9 +36,23 @@ namespace VerbGame
         [SerializeField] private Button respawnButton;
         [SerializeField] private Button exportButton;
         [SerializeField] private Button importButton;
+        [SerializeField] private Button placeModeButton;
+        [SerializeField] private Button cameraModeButton;
+        [SerializeField] private TMP_Text placeModeIcon;
+        [SerializeField] private TMP_Text cameraModeIcon;
         [SerializeField] private TMP_Text messageLabel;
         [SerializeField] private float previewAlpha = 0.35f;
         [SerializeField] private int previewSortingOrder = 10;
+
+        [Header("カメラ操作")]
+        [SerializeField] private float minOrthographicSize = 4f;
+        [SerializeField] private float maxOrthographicSize = 18f;
+        [SerializeField] private float zoomStep = 1.25f;
+        [SerializeField] private float cameraDragThresholdSqr = 25f;
+        [SerializeField] private float defaultOrthographicSize = 5f;
+
+        [Header("破壊設定")]
+        [SerializeField] private DestroyLayerMode destroyLayerMode = DestroyLayerMode.AllLayers;
 
         // 編集モード全体の表示状態。
         private bool isUiVisible;
@@ -32,20 +60,28 @@ namespace VerbGame
         private bool isDragging;
         // 現在のドラッグが破壊モードかどうか。
         private bool isDestroyDragging;
-        // 中クリックが押されている間だけ true。
-        private bool isMiddleButtonHeld;
-        // 中クリックが「クリック」ではなく「パン」に入ったかどうか。
-        private bool isMiddleDragPanning;
         // ドラッグ編集の開始セル。
         private Vector3Int dragStartCell;
         // ドラッグ編集の現在セル。
         private Vector3Int dragCurrentCell;
-        // 中クリック開始位置。クリック判定とパン量計算の基準に使う。
-        private Vector2 middlePressScreenPosition;
+        // カメラドラッグ開始位置。パン量計算の基準に使う。
+        private Vector2 cameraDragStartScreenPosition;
         // パン開始時のカメラ位置。
         private Vector3 cameraPanStartPosition;
         // ドラッグ矩形プレビューの描画担当。
         private LevelEditModePreview preview;
+        // Ctrl による一時カメラモードかどうか。
+        private bool isTemporaryCameraMode;
+        // アイコンボタンで固定した基本モード。
+        private EditInteractionMode selectedMode = EditInteractionMode.Place;
+        // カメラドラッグ継続中かどうか。
+        private bool isCameraDragging;
+        // 現在のカメラドラッグが中クリック起点かどうか。
+        private bool isCameraDraggingWithMiddleButton;
+        // 今回の押下がクリックではなくドラッグとして成立したかどうか。
+        private bool hasCameraDragMoved;
+        // 今回の中クリック押し込み中にズームしたかどうか。
+        private bool didZoomDuringCurrentMiddleHold;
         // Stage 探索は Stage 側へ寄せ、編集モード側は窓口だけを見る。
         private Stage CurrentStage => Stage.Instance;
         private Grid Grid => CurrentStage != null ? CurrentStage.Grid : null;
@@ -62,6 +98,11 @@ namespace VerbGame
                 cameraController = worldCamera.GetComponent<CameraController>();
             }
 
+            if (worldCamera != null && worldCamera.orthographic)
+            {
+                defaultOrthographicSize = worldCamera.orthographicSize;
+            }
+
             // ここでは司令塔から詳細実装を分離して組み立てだけ行う。
             preview = new LevelEditModePreview(transform, Grid, previewAlpha, previewSortingOrder);
 
@@ -72,6 +113,7 @@ namespace VerbGame
                 tilePalette.SelectionChanged += HandleTilePaletteSelectionChanged;
             }
             tilePalette?.Build();
+            SetSelectedMode(EditInteractionMode.Place);
             SetUiVisible(false);
             SetMessage(string.Empty);
         }
@@ -93,6 +135,7 @@ namespace VerbGame
             }
 
             HandleCameraInput();
+            HandleZoomInput();
             HandleScrollSelection();
             HandlePaintingInput();
         }
@@ -104,39 +147,76 @@ namespace VerbGame
             if (respawnButton != null) respawnButton.onClick.AddListener(RespawnPlayerToSpawn);
             if (exportButton != null) exportButton.onClick.AddListener(ExportToClipboard);
             if (importButton != null) importButton.onClick.AddListener(ImportFromClipboard);
+            if (placeModeButton != null) placeModeButton.onClick.AddListener(() => SetSelectedMode(EditInteractionMode.Place));
+            if (cameraModeButton != null) cameraModeButton.onClick.AddListener(() => SetSelectedMode(EditInteractionMode.Camera));
         }
 
-        // 中クリックのドラッグでパンし、チョン押しならプレイヤー追従へ戻す。
+        // Ctrl / 中クリック押し込みの一時モードと、パン入力を処理する。
         private void HandleCameraInput()
         {
-            if (Mouse.current == null || worldCamera == null) return;
+            if (Mouse.current == null || worldCamera == null || Keyboard.current == null) return;
 
-            // 押し始めの位置とカメラ位置を記録して、クリックかドラッグかを後で判定する。
-            if (Mouse.current.middleButton.wasPressedThisFrame)
+            // Ctrl または中クリック押し込み中は、一時的にカメラモードへ切り替える。
+            bool shouldUseTemporaryCameraMode =
+                Keyboard.current.leftCtrlKey.isPressed ||
+                Keyboard.current.rightCtrlKey.isPressed ||
+                Mouse.current.middleButton.isPressed;
+
+            if (isTemporaryCameraMode != shouldUseTemporaryCameraMode)
             {
-                isMiddleButtonHeld = true;
-                isMiddleDragPanning = false;
-                middlePressScreenPosition = Mouse.current.position.ReadValue();
-                cameraPanStartPosition = worldCamera.transform.position;
+                isTemporaryCameraMode = shouldUseTemporaryCameraMode;
+                UpdateModeVisuals();
             }
 
-            if (!isMiddleButtonHeld)
+            bool canPan = CurrentMode == EditInteractionMode.Camera || isCameraDragging;
+            if (!canPan)
+            {
+                if (isCameraDragging)
+                {
+                    isCameraDragging = false;
+                }
+
+                return;
+            }
+
+            // カメラモード中は左ドラッグでも中ドラッグでも視点を平行移動できる。
+            bool middlePressedThisFrame = Mouse.current.middleButton.wasPressedThisFrame;
+            if (Mouse.current.leftButton.wasPressedThisFrame)
+            {
+                if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                {
+                    return;
+                }
+
+                isCameraDragging = true;
+                isCameraDraggingWithMiddleButton = false;
+                hasCameraDragMoved = false;
+                cameraDragStartScreenPosition = Mouse.current.position.ReadValue();
+                cameraPanStartPosition = worldCamera.transform.position;
+                cameraController?.SetFollowEnabled(false);
+            }
+            else if (middlePressedThisFrame)
+            {
+                isCameraDragging = true;
+                isCameraDraggingWithMiddleButton = true;
+                hasCameraDragMoved = false;
+                didZoomDuringCurrentMiddleHold = false;
+                cameraDragStartScreenPosition = Mouse.current.position.ReadValue();
+                cameraPanStartPosition = worldCamera.transform.position;
+                cameraController?.SetFollowEnabled(false);
+            }
+
+            if (!isCameraDragging)
             {
                 return;
             }
 
             Vector2 currentScreenPosition = Mouse.current.position.ReadValue();
-            if (!isMiddleDragPanning && (currentScreenPosition - middlePressScreenPosition).sqrMagnitude >= 25f)
+            if ((currentScreenPosition - cameraDragStartScreenPosition).sqrMagnitude >= cameraDragThresholdSqr)
             {
-                // 少しでも動いたらクリックではなくパンとして扱う。
-                isMiddleDragPanning = true;
-                cameraController?.SetFollowEnabled(false);
-            }
-
-            if (isMiddleDragPanning)
-            {
+                hasCameraDragMoved = true;
                 // 画面上の移動量をワールド座標に変換してカメラへ反映する。
-                Vector3 targetCameraPosition = cameraPanStartPosition + GetCameraPanDelta(middlePressScreenPosition, currentScreenPosition);
+                Vector3 targetCameraPosition = cameraPanStartPosition + GetCameraPanDelta(cameraDragStartScreenPosition, currentScreenPosition);
                 targetCameraPosition.z = cameraPanStartPosition.z;
 
                 if (cameraController != null)
@@ -149,26 +229,56 @@ namespace VerbGame
                 }
             }
 
-            if (!Mouse.current.middleButton.wasReleasedThisFrame)
+            bool dragReleased = isCameraDraggingWithMiddleButton
+                ? Mouse.current.middleButton.wasReleasedThisFrame
+                : Mouse.current.leftButton.wasReleasedThisFrame;
+            if (!dragReleased)
             {
                 return;
             }
 
-            bool wasPanning = isMiddleDragPanning;
-            isMiddleButtonHeld = false;
-            isMiddleDragPanning = false;
-
-            if (!wasPanning)
+            // Ctrl+クリックまたは中クリックのチョン押し時は、プレイヤー追従へ戻す。
+            bool shouldReturnToFollow =
+                !hasCameraDragMoved &&
+                (isTemporaryCameraMode || isCameraDraggingWithMiddleButton) &&
+                (!isCameraDraggingWithMiddleButton || !didZoomDuringCurrentMiddleHold);
+            if (shouldReturnToFollow)
             {
-                // 動かしていなければ「追従へ戻すクリック」とみなす。
                 ReturnCameraFollowToPlayer();
             }
+
+            isCameraDragging = false;
+            isCameraDraggingWithMiddleButton = false;
+            hasCameraDragMoved = false;
+            didZoomDuringCurrentMiddleHold = false;
         }
 
-        // ホイール上下で選択タイルを前後に切り替える。
+        // カメラモード中だけ、ホイール上下で表示倍率を変更する。
+        private void HandleZoomInput()
+        {
+            if (Mouse.current == null || worldCamera == null || !worldCamera.orthographic) return;
+            if (CurrentMode != EditInteractionMode.Camera) return;
+
+            float scrollY = Mouse.current.scroll.ReadValue().y;
+            if (Mathf.Abs(scrollY) < 0.01f) return;
+
+            if (Mouse.current.middleButton.isPressed)
+            {
+                didZoomDuringCurrentMiddleHold = true;
+            }
+
+            // ホイール上でズームイン、下でズームアウトにする。
+            float zoomDirection = scrollY > 0f ? -1f : 1f;
+            float nextSize = worldCamera.orthographicSize + (zoomStep * zoomDirection);
+            worldCamera.orthographicSize = Mathf.Clamp(nextSize, minOrthographicSize, maxOrthographicSize);
+            SetMessage($"表示倍率: {worldCamera.orthographicSize:0.0}");
+        }
+
+        // 配置モード中だけ、ホイール上下で選択タイルを前後に切り替える。
         private void HandleScrollSelection()
         {
             if (Mouse.current == null || tilePalette == null || tilePalette.SelectableEntries.Count == 0) return;
+            if (CurrentMode != EditInteractionMode.Place) return;
 
             float scrollY = Mouse.current.scroll.ReadValue().y;
             if (Mathf.Abs(scrollY) < 0.01f) return;
@@ -179,8 +289,14 @@ namespace VerbGame
         // 左クリックで配置、右クリックで破壊の矩形編集を行う。
         private void HandlePaintingInput()
         {
-            if (Mouse.current == null || Mouse.current.middleButton.isPressed)
+            if (Mouse.current == null || CurrentMode == EditInteractionMode.Camera)
             {
+                if (isDragging)
+                {
+                    isDragging = false;
+                    preview?.Hide();
+                }
+
                 return;
             }
 
@@ -285,7 +401,7 @@ namespace VerbGame
             }
 
             Tilemap targetTilemap = GetTargetTilemap(selectedEntry);
-            if (targetTilemap == null)
+            if (!destroyTiles && targetTilemap == null)
             {
                 SetMessage("対象レイヤーが見つかりません");
                 return;
@@ -302,11 +418,19 @@ namespace VerbGame
                 for (int x = minX; x <= maxX; x++)
                 {
                     Vector3Int cell = new(x, y, 0);
-                    targetTilemap.SetTile(cell, destroyTiles ? null : tileToPaint);
+                    if (destroyTiles)
+                    {
+                        DestroyTilesAt(cell, selectedEntry);
+                    }
+                    else
+                    {
+                        targetTilemap.SetTile(cell, tileToPaint);
+                    }
                 }
             }
 
-            targetTilemap.CompressBounds();
+            GroundTilemap?.CompressBounds();
+            OverlayTilemap?.CompressBounds();
             RefreshSpawnTileVisibility();
             SetMessage($"{(destroyTiles ? "破壊" : "配置")} [{minX},{minY}] - [{maxX},{maxY}]");
         }
@@ -320,6 +444,17 @@ namespace VerbGame
                 uiRoot.SetActive(visible);
             }
 
+            if (!visible)
+            {
+                isCameraDragging = false;
+                isCameraDraggingWithMiddleButton = false;
+                hasCameraDragMoved = false;
+                didZoomDuringCurrentMiddleHold = false;
+                isDragging = false;
+                isTemporaryCameraMode = false;
+            }
+
+            UpdateModeVisuals();
             // Spawn タイルは編集時だけ見せる。
             RefreshSpawnTileVisibility();
         }
@@ -487,6 +622,11 @@ namespace VerbGame
         // 中クリックのチョン押し時に、カメラをプレイヤー追従へ戻す。
         private void ReturnCameraFollowToPlayer()
         {
+            if (worldCamera != null && worldCamera.orthographic)
+            {
+                worldCamera.orthographicSize = Mathf.Clamp(defaultOrthographicSize, minOrthographicSize, maxOrthographicSize);
+            }
+
             if (cameraController != null)
             {
                 cameraController.ResumeFollowToTarget();
@@ -531,7 +671,7 @@ namespace VerbGame
         {
             if (messageLabel != null)
             {
-                string operationGuide = "左:配置 / 右:破壊 / 中ドラッグ:パン / 中クリック:追従 / ホイール:切替";
+                string operationGuide = "左:配置 / ホイール:タイル切替 / Ctrl+左 or 中ドラッグ:視点移動 / Ctrl+クリック or 中クリック:追従復帰 / カメラ中ホイール:ズーム / 右:範囲内を全削除 / アイコン:モード切替";
                 messageLabel.text = string.IsNullOrWhiteSpace(message)
                     ? operationGuide
                     : $"{operationGuide}\n{message}";
@@ -547,6 +687,64 @@ namespace VerbGame
         private void HandleTilePaletteSelectionChanged(WallPanelDefinition _)
         {
             SetMessage(string.Empty);
+        }
+
+        // 固定モードを切り替え、ボタン見た目も同期する。
+        private void SetSelectedMode(EditInteractionMode mode)
+        {
+            selectedMode = mode;
+            UpdateModeVisuals();
+            SetMessage(mode == EditInteractionMode.Camera ? "カメラモード" : "配置モード");
+        }
+
+        // 現在有効なモードを返す。
+        private EditInteractionMode CurrentMode => isTemporaryCameraMode ? EditInteractionMode.Camera : selectedMode;
+
+        // モード切替ボタンの色と押下状態を同期する。
+        private void UpdateModeVisuals()
+        {
+            UpdateModeButtonVisual(placeModeButton, placeModeIcon, CurrentMode == EditInteractionMode.Place);
+            UpdateModeButtonVisual(cameraModeButton, cameraModeIcon, CurrentMode == EditInteractionMode.Camera);
+        }
+
+        // 選択中モードだけ目立つ色にして、UIから状態が読めるようにする。
+        private static void UpdateModeButtonVisual(Button button, Graphic iconGraphic, bool isSelected)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            Color backgroundColor = isSelected
+                ? new Color(0.86f, 0.77f, 0.28f, 1f)
+                : new Color(0.18f, 0.2f, 0.24f, 0.96f);
+            Color iconColor = isSelected
+                ? new Color(0.1f, 0.11f, 0.14f, 1f)
+                : new Color(0.95f, 0.96f, 0.98f, 1f);
+
+            if (button.targetGraphic is Graphic targetGraphic)
+            {
+                targetGraphic.color = backgroundColor;
+            }
+
+            if (iconGraphic != null)
+            {
+                iconGraphic.color = iconColor;
+            }
+        }
+
+        // 右ドラッグ破壊は選択レイヤーだけでなく、必要に応じて全レイヤーを消す。
+        private void DestroyTilesAt(Vector3Int cell, WallPanelDefinition selectedEntry)
+        {
+            if (destroyLayerMode == DestroyLayerMode.AllLayers)
+            {
+                GroundTilemap?.SetTile(cell, null);
+                OverlayTilemap?.SetTile(cell, null);
+                return;
+            }
+
+            Tilemap targetTilemap = GetTargetTilemap(selectedEntry);
+            targetTilemap?.SetTile(cell, null);
         }
     }
 }
