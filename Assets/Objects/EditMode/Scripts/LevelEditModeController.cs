@@ -70,6 +70,8 @@ namespace VerbGame
         private Vector3 cameraPanStartPosition;
         // ドラッグ矩形プレビューの描画担当。
         private LevelEditModePreview preview;
+        // クリップボード権限まわりの警告表示。
+        private string clipboardWarningMessage;
         // Ctrl による一時カメラモードかどうか。
         private bool isTemporaryCameraMode;
         // アイコンボタンで固定した基本モード。
@@ -115,6 +117,7 @@ namespace VerbGame
             tilePalette?.Build();
             SetSelectedMode(EditInteractionMode.Place);
             SetUiVisible(false);
+            clipboardWarningMessage = string.Empty;
             SetMessage(string.Empty);
         }
 
@@ -453,6 +456,10 @@ namespace VerbGame
                 isDragging = false;
                 isTemporaryCameraMode = false;
             }
+            else
+            {
+                RefreshClipboardAvailabilityWarning();
+            }
 
             UpdateModeVisuals();
             // Spawn タイルは編集時だけ見せる。
@@ -510,7 +517,7 @@ namespace VerbGame
 
             if (!success)
             {
-                SetMessage(string.IsNullOrWhiteSpace(errorMessage) ? "CSV の貼り付けに失敗しました" : errorMessage);
+                SetMessage(BuildClipboardFailureMessage(errorMessage, true));
                 return;
             }
 
@@ -534,11 +541,35 @@ namespace VerbGame
 
             if (!success)
             {
-                SetMessage(string.IsNullOrWhiteSpace(errorMessage) ? "CSV のコピーに失敗しました" : errorMessage);
+                SetMessage(BuildClipboardFailureMessage(errorMessage, false));
                 return;
             }
 
             SetMessage($"CSVをコピーしました: {bounds.size.x}x{bounds.size.y}");
+        }
+
+        // 編集モードを開いた時点で、クリップボード機能が使えない環境なら警告を出す。
+        private void RefreshClipboardAvailabilityWarning()
+        {
+            if (!LevelEditModeClipboardBridge.TryCheckClipboardAvailability(HandleClipboardAvailabilityChecked))
+            {
+                clipboardWarningMessage = "!!警告!!: クリップボードが無効なためステージはエクスポートできません！せっかく作ったステージを保存するためにも「別タブで開く」で開き直して下さい！";
+                SetMessage(string.Empty);
+            }
+        }
+
+        // クリップボード可用性チェック結果を UI 警告へ反映する。
+        private void HandleClipboardAvailabilityChecked(bool available, string reason)
+        {
+            if (this == null)
+            {
+                return;
+            }
+
+            clipboardWarningMessage = available
+                ? string.Empty
+                : BuildClipboardWarningMessage(reason);
+            SetMessage(string.Empty);
         }
 
         // いま置かれている Spawn タイル位置へプレイヤーを戻す。
@@ -672,10 +703,98 @@ namespace VerbGame
             if (messageLabel != null)
             {
                 string operationGuide = "左:配置 / ホイール:タイル切替 / Ctrl+左 or 中ドラッグ:視点移動 / Ctrl+クリック or 中クリック:追従復帰 / カメラ中ホイール:ズーム / 右:範囲内を全削除 / アイコン:モード切替";
-                messageLabel.text = string.IsNullOrWhiteSpace(message)
-                    ? operationGuide
-                    : $"{operationGuide}\n{message}";
+                if (string.IsNullOrWhiteSpace(message) && string.IsNullOrWhiteSpace(clipboardWarningMessage))
+                {
+                    messageLabel.text = operationGuide;
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(message))
+                {
+                    messageLabel.text = $"{operationGuide}\n{clipboardWarningMessage}";
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(clipboardWarningMessage))
+                {
+                    messageLabel.text = $"{operationGuide}\n{message}";
+                    return;
+                }
+
+                messageLabel.text = $"{operationGuide}\n{clipboardWarningMessage}\n{message}";
             }
+        }
+
+        // ブラウザ由来のエラーコードや生文言を、ユーザー向けの日本語メッセージへ寄せる。
+        private static string BuildClipboardFailureMessage(string errorMessage, bool isPaste)
+        {
+            if (string.IsNullOrWhiteSpace(errorMessage))
+            {
+                return isPaste ? "CSV の貼り付けに失敗しました" : "CSV のコピーに失敗しました";
+            }
+
+            if (ContainsClipboardPolicyBlocked(errorMessage))
+            {
+                return "UnityRoomの埋め込み表示ではコピー/ペーストが使えません。「別タブで開く」を使ってください";
+            }
+
+            if (ContainsClipboardPermissionDenied(errorMessage))
+            {
+                return "クリップボードが使えません。「別タブで開く」で開き直してください";
+            }
+
+            if (errorMessage.Contains("ClipboardUnsupported", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return "この環境ではコピー/ペーストが使えません。「別タブで開く」で開き直してください";
+            }
+
+            return errorMessage;
+        }
+
+        // 編集モードを開いた時の常設警告メッセージを作る。
+        private static string BuildClipboardWarningMessage(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                return "!!警告!!: クリップボードが無効なためステージは保存できません！せっかく作ったステージを保存するためにも「別タブで開く」で開き直してください！";
+            }
+
+            if (ContainsClipboardPolicyBlocked(reason))
+            {
+                return "!!警告!!: UnityRoomの埋め込み表示ではコピー/ペーストが使えません！せっかく作ったステージを保存するためにも「別タブで開く」で開き直してください！";
+            }
+
+            if (ContainsClipboardPermissionDenied(reason))
+            {
+                return "!!警告!!: クリップボードが使えません！せっかく作ったステージを保存するためにも「別タブで開く」で開き直してください！";
+            }
+
+            if (reason.Contains("ClipboardUnsupported", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return "!!警告!!: この環境ではコピー/ペーストが使えません！「別タブで開く」で開き直してください！";
+            }
+
+            return "!!警告!!: クリップボードが無効なためステージは保存できません！せっかく作ったステージを保存するためにも「別タブで開く」で開き直してください！";
+        }
+
+        // 権限ポリシーで API が無効化されている典型文言をまとめて判定する。
+        private static bool ContainsClipboardPolicyBlocked(string message)
+        {
+            return !string.IsNullOrWhiteSpace(message) &&
+                   (message.Contains("ClipboardBlockedByPermissionsPolicy", System.StringComparison.OrdinalIgnoreCase) ||
+                    message.Contains("PermissionsPolicy", System.StringComparison.OrdinalIgnoreCase) ||
+                    message.Contains("permissions policy", System.StringComparison.OrdinalIgnoreCase) ||
+                    message.Contains("crbug.com/414348233", System.StringComparison.OrdinalIgnoreCase));
+        }
+
+        // 権限拒否の典型文言をまとめて判定する。
+        private static bool ContainsClipboardPermissionDenied(string message)
+        {
+            return !string.IsNullOrWhiteSpace(message) &&
+                   (message.Contains("ClipboardPermissionDenied", System.StringComparison.OrdinalIgnoreCase) ||
+                    message.Contains("NotAllowedError", System.StringComparison.OrdinalIgnoreCase) ||
+                    message.Contains("PermissionDenied", System.StringComparison.OrdinalIgnoreCase) ||
+                    message.Contains("denied", System.StringComparison.OrdinalIgnoreCase));
         }
 
         private Tilemap GetTargetTilemap(WallPanelDefinition entry)

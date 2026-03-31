@@ -12,11 +12,15 @@ namespace VerbGame
 #if UNITY_WEBGL && !UNITY_EDITOR
         // コピー要求中の完了コールバックを保持しておく。
         private static Action<bool, string> pendingCopyCallback;
+        // クリップボード可用性チェック中の完了コールバックを保持しておく。
+        private static Action<bool, string> pendingClipboardAvailabilityCallback;
         // 貼り付け要求中の完了コールバックを保持しておく。
         private static Action<bool, string, string> pendingPasteCallback;
 
         // jslib から呼び返されるコピー完了コールバックの型。
         private delegate void CopyCompletedCallback(int success, IntPtr errorPointer);
+        // jslib から呼び返される可用性チェック完了コールバックの型。
+        private delegate void ClipboardAvailabilityCallback(int available, IntPtr reasonPointer);
         // jslib から呼び返される貼り付け完了コールバックの型。
         private delegate void PasteCompletedCallback(int success, IntPtr textPointer, IntPtr errorPointer);
 #endif
@@ -25,6 +29,10 @@ namespace VerbGame
         // WebGL 実機では .jslib 側の関数へ橋渡しする。
         [DllImport("__Internal")]
         private static extern void CopyWebGL(string text, CopyCompletedCallback callback);
+
+        // WebGL 実機ではクリップボード API の可用性を jslib 側で確認する。
+        [DllImport("__Internal")]
+        private static extern void CheckClipboardAvailabilityWebGL(ClipboardAvailabilityCallback callback);
 
         // WebGL 実機では navigator.clipboard.readText() を jslib 側で実行する。
         [DllImport("__Internal")]
@@ -72,6 +80,40 @@ namespace VerbGame
             // Editor / ネイティブ実行では Unity 標準のクリップボード API を使う。
             GUIUtility.systemCopyBuffer = text;
             onCompleted?.Invoke(true, string.Empty);
+            return true;
+#endif
+        }
+
+        // クリップボードの読み書きが使えそうかを事前確認する共通窓口。
+        public static bool TryCheckClipboardAvailability(Action<bool, string> onCompleted)
+        {
+            if (onCompleted == null)
+            {
+                return false;
+            }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // WebGL 実機ではブラウザポリシーや権限状態を非同期で確認する。
+            if (pendingClipboardAvailabilityCallback != null)
+            {
+                pendingClipboardAvailabilityCallback = null;
+            }
+
+            pendingClipboardAvailabilityCallback = onCompleted;
+            try
+            {
+                CheckClipboardAvailabilityWebGL(HandleClipboardAvailabilityCheckedFromWebGl);
+            }
+            catch (Exception exception)
+            {
+                pendingClipboardAvailabilityCallback = null;
+                onCompleted(false, exception.Message);
+            }
+
+            return true;
+#else
+            // Editor / ネイティブ実行ではクリップボード機能を利用可能として扱う。
+            onCompleted(true, string.Empty);
             return true;
 #endif
         }
@@ -126,6 +168,22 @@ namespace VerbGame
 
             string error = PtrToStringUtf8(errorPointer);
             callback(success != 0, error);
+        }
+
+        // jslib から直接呼び返される WebGL 可用性チェック完了通知。
+        [MonoPInvokeCallback(typeof(ClipboardAvailabilityCallback))]
+        private static void HandleClipboardAvailabilityCheckedFromWebGl(int available, IntPtr reasonPointer)
+        {
+            Action<bool, string> callback = pendingClipboardAvailabilityCallback;
+            pendingClipboardAvailabilityCallback = null;
+
+            if (callback == null)
+            {
+                return;
+            }
+
+            string reason = PtrToStringUtf8(reasonPointer);
+            callback(available != 0, reason);
         }
 
         // jslib から直接呼び返される WebGL 貼り付け完了通知。

@@ -76,6 +76,50 @@ mergeInto(LibraryManager.library, {
 
     fallbackCopy();
   },
+  CheckClipboardAvailabilityWebGL: function (callback) {
+    // JavaScript から C# コールバックを直接呼び返すためのヘルパー。
+    var invokeCallback = function (available, reason) {
+      var reasonBuffer = reason ? stringToNewUTF8(reason) : 0;
+      try {
+        {{{ makeDynCall('vii', 'callback') }}}(available ? 1 : 0, reasonBuffer);
+      } finally {
+        if (reasonBuffer) {
+          _free(reasonBuffer);
+        }
+      }
+    };
+
+    // iframe / Permissions Policy 側で塞がれている場合はここで弾ける。
+    var permissionsPolicy = document.permissionsPolicy || document.featurePolicy;
+    if (permissionsPolicy && permissionsPolicy.allowsFeature && !permissionsPolicy.allowsFeature("clipboard-read")) {
+      invokeCallback(false, "ClipboardBlockedByPermissionsPolicy");
+      return;
+    }
+
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      invokeCallback(false, "ClipboardUnsupported");
+      return;
+    }
+
+    // 権限 API が使えれば denied を事前に検知する。
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: "clipboard-read" })
+        .then(function (result) {
+          if (result.state === "denied") {
+            invokeCallback(false, "ClipboardPermissionDenied");
+            return;
+          }
+
+          invokeCallback(true, "");
+        })
+        .catch(function (error) {
+          invokeCallback(false, error ? String(error) : "ClipboardAvailabilityCheckFailed");
+        });
+      return;
+    }
+
+    invokeCallback(true, "");
+  },
   AsyncPasteWebGL: function (callback) {
     // JavaScript から C# コールバックを直接呼び返すためのヘルパー。
     var invokeCallback = function (success, text, error) {
